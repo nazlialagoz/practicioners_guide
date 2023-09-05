@@ -1,6 +1,8 @@
 # Graph DiD papers by year 
 library(data.table)
 
+out_dir <- '../output/'
+dir.create(out_dir, showWarnings = F)
 
 # Define preferred ggplot theme
 my_theme <- function() {
@@ -13,7 +15,7 @@ my_theme <- function() {
   )
 }
 
-dt <- fread("DiD_allmarketing.txt", sep = "\t")
+dt <- fread("../external/DiD_allmarketing.txt", sep = "\t")
 dt <- dt[PY >= 2015]
 head(dt)
 
@@ -51,7 +53,6 @@ gg <- ggplot(summary_table, aes(x = PY, y = Number_of_Papers, fill = Journal)) +
   ylab("Number of Papers")+
   my_theme() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
 # Display the plot
 print(gg)
+ggsave(paste0(out_dir, 'pubs_overyears_by_so.png'))
