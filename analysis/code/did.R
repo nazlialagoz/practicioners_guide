@@ -103,7 +103,19 @@ ggdid(out)
   # using higher critical values to account for simultanous testing
   # Thus the diff in the significance in addition to diff in the SEs
 
-# D) Stacked DiD ---------------------------------------------------------------
+# D) ETWFE       ---------------------------------------------------------------
+dt
+mod_etwfe =
+  etwfe(
+    fml  = hrs_listened ~ 1, # outcome ~ controls
+    tvar = period,        # time variable
+    gvar = cohort_period, # group variable
+    data = dt,       # dataset
+    vcov = ~unit  # vcov adjustment (here: clustered)
+  )
+summary(mod_etwfe)
+
+# E) Stacked DiD ---------------------------------------------------------------
 head(dt)
 
 # Create relative time dummy
@@ -115,7 +127,7 @@ sort(unique(dt$time_since_treat))
 
 # Simple TWFE --------------------------------------------------------------
 # Define reference period: the most negative period
-REF_PERIODS = c((min((dt$time_since_treat))),(min((dt$time_since_treat)))+1)
+REF_PERIODS = sort(unique(dt$time_since_treat)[unique(dt$time_since_treat)<0])
 # there are no untreated group so not c(REF_PERIOD, -999), ie. ref period the most neg and also untreated
 
 run_twfe <- function(dv){
@@ -186,12 +198,21 @@ run_model <- function(outcome_variable, MAX_WEEKS) {
   # ref = REF_PERIODS
   
   # Model
-  model_formula <- as.formula(paste(outcome_variable, "~ i(time_to_treatment, ref = c(-2,-1)) | 
+  model_formula <- as.formula(paste(outcome_variable, "~ i(time_to_treatment, ref = REF_PERIODS) | 
                                      unit^df + period^df"))
   
   model <- feols(model_formula, 
                  data = stacked_data, 
                  cluster = "bracket_df")
+  
+  stacked_data[, treat := cohort_period_2*period_2]
+  model_formula2 <- as.formula(paste(outcome_variable, "~ treat | 
+                                     unit^df + period^df"))
+  
+  model <- feols(model_formula2, 
+                 data = stacked_data, 
+                 cluster = "bracket_df")
+  # TODO: solve collinearity issue
   
   # Process results
   stacked <- broom::tidy(model,conf.int = TRUE) %>% 
@@ -279,7 +300,6 @@ for(i in 0:(length(stacked_treat$t)-1)){
 }
 obs_num_t<-(as.data.table(obs_num_t))
 
-# TODO: check, how can there be more the least number of tracks in relative time 0???
 obs_num_t[, total_N := sum(obs_num_t)]
 obs_num_t[, weight := obs_num_t/total_N]
 stopifnot(sum(obs_num_t$weight)==1)
@@ -379,7 +399,5 @@ for(pop_metric in pop_metrics) {
 }
 
 
-# E) ETWFE       ---------------------------------------------------------------
-
-
+# Beep -------------
 beep()

@@ -15,6 +15,7 @@ library(fixest) # Fixed-effects regression
 library(kableExtra) # Make nice tables
 library(bacondecomp) # Goodman-Bacon Decomposition
 library(did) # Difference-in-differences
+library(etwfe)
 
 
 dir.create('../output/',  showWarnings = FALSE)
