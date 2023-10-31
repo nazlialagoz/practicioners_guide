@@ -2,7 +2,7 @@
 # Simulation study for the DiD article: 
 
 rm(list = ls())
-source('../simulation/code/sim_data.R') # Import simulation function and some utilities
+source('../../simulation/code/sim_data.R') # Import simulation function and some utilities
 source('common_def_func.R') # Import libraries and common functions
 
 dt <- sim_data()
