@@ -2,7 +2,7 @@
 # Simulation study for the DiD article: 
 
 rm(list = ls())
-source('../simulation/sim_data.R') # Import simulation function and some utilities
+source('../simulation/code/sim_data.R') # Import simulation function and some utilities
 source('common_def_func.R') # Import libraries and common functions
 
 dt <- sim_data()
@@ -114,7 +114,6 @@ sort(unique(dt$time_since_treat))
 
 
 # Simple TWFE --------------------------------------------------------------
-
 # Define reference period: the most negative period
 REF_PERIODS = c((min((dt$time_since_treat))),(min((dt$time_since_treat)))+1)
 # there are no untreated group so not c(REF_PERIOD, -999), ie. ref period the most neg and also untreated
@@ -317,7 +316,7 @@ run_model_cov <- function(outcome_variable, MAX_WEEKS, cov) {
 }
 # ps. for title pop. nontreat is NA
 models_cov <- list()
-dvs <- c('n_playlist_inclusion_log','sumfollowers_log')
+dvs <- dv
 covs <- c('n_playlist_inclusion_earliest','sumfollowers_earliest', 'song_age_yr','title_numVotes') # shouldn't be song age year and title num votes also be omitted as they are constant for each song.
 
 for(dv in dvs){
@@ -357,7 +356,7 @@ run_model_cov_all <- function(outcome_variable, MAX_WEEKS,pop_metric) {
 
 
 models_cov_all <- list()
-dvs <- c('n_playlist_inclusion_log','sumfollowers_log')
+dvs <- dv
 pop_metrics <- c('n_playlist_inclusion_earliest','sumfollowers_earliest')
 
 # Iterate over both dependent variables and population metrics
