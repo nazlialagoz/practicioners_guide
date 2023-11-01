@@ -6,6 +6,9 @@ source('../../simulation/code/sim_data.R') # Import simulation function and some
 source('common_def_func.R') # Import libraries and common functions
 
 dt <- sim_data()
+unique(dt$cohort_period)
+unique(dt$period)
+# dt <- dt[] # exclude period where everyone is treated so that we have an untreated group
 
 # EDA and Analysis --------------------------------------------------------
 # Check out the data
@@ -19,7 +22,7 @@ kable(summary(dt[, ..select_cols]), 'simple')
 dt[, .N, by = cohort_period] # group sizes
 dt[, .(mean_hrs_listened = mean(hrs_listened)), by = cohort_period]
 
-# Visualize the outcome variable 
+# Visualize the outcome variable -----------------------------------------------
 avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
 
 ggplot(avg_dv_period, aes(fill=factor(cohort_period), y=mean_hrs_listened, x=period)) + 
@@ -67,10 +70,10 @@ sum(bacon_decomp$weight * bacon_decomp$estimate)
 # B) DiD with post-period-cohort specific TEs ----------------------------------
 
 # Drop periods where everyone is treated
-dt <- dt[period < 3]
+dt_did <- dt[period < 3]
 
 # Create dummy variables
-dt <- dt %>% 
+dt_did <- dt_did %>% 
   dummy_cols(select_columns = c("cohort_period", "period"))
 
 interact_covs <- 'cohort_period_2:period_2'
@@ -78,7 +81,7 @@ interact_covs <- 'cohort_period_2:period_2'
 # Regression
 formula <- as.formula(paste0('hrs_listened ~ ',interact_covs))
 model <- feols(formula,
-               data = dt, panel.id = "unit",
+               data = dt_did, panel.id = "unit",
                fixef = c("unit", "period"), cluster = "unit")
 summary(model) 
 
@@ -120,15 +123,20 @@ head(dt)
 
 # Create relative time dummy
 dt[, time_since_treat := period-cohort_period]
+dt[cohort_period>max(period), time_since_treat:= -999] # nontreated group
+dt[, treatment_group:= ifelse(time_since_treat != -999, 1,0)] # nontreated group
 sort(unique(dt$time_since_treat))
 
-# dt[is.NA(cohort_period), time_since_treat:= 10000] # nontreated group
+unique(dt[time_since_treat == -999]$cohort_period)
+dt[time_since_treat == -999, cohort_period := 999]
 
 
 # Simple TWFE --------------------------------------------------------------
 # Define reference period: the most negative period
-REF_PERIODS = sort(unique(dt$time_since_treat)[unique(dt$time_since_treat)<0])
+REF_PERIOD = min(unique(dt[cohort_period!=999]$time_since_treat))
+
 # there are no untreated group so not c(REF_PERIOD, -999), ie. ref period the most neg and also untreated
+REF_PERIODS = c(-999, REF_PERIOD)
 
 run_twfe <- function(dv){
   formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = REF_PERIODS)")) 
@@ -148,14 +156,12 @@ dv = 'hrs_listened'
 
 # Create stacked data -----------------------------------------------------
 ### for stacking
-groups <- dt %>% 
-  filter(cohort_period != 10000) %>% # untreated group
-  pull(cohort_period) %>% 
-  unique()
+groups <- unique(dt[cohort_period != 999]$cohort_period)
 
 sort(groups)
+sort(unique(dt$period))
 
-MAX_WEEKS = 3 # indicates the time window around treatment
+MAX_WEEKS = 2 # indicates the time window around treatment
 
 ### create stacked data
 getdata <- function(i) {
@@ -169,24 +175,19 @@ getdata <- function(i) {
     filter(period >= (i - MAX_WEEKS) & period <= (i + MAX_WEEKS)) %>%
     # create an indicator for the dataset
     mutate(df = i) %>% 
-    mutate(time_to_treatment = period - cohort_period) %>% 
+    # mutate(time_to_treatment = period - cohort_period) %>% 
     # make dummies
-    mutate(time_to_treatment = if_else(cohort_period == i, time_to_treatment, 0L))
+    mutate(time_since_treat = if_else(cohort_period == i, time_since_treat, -999)) # TODO: check this
 }
 stacked_data <- map_df(groups, getdata) %>% 
   mutate(bracket_df = paste(unit,df))
 
 stacked_data<- as.data.table(stacked_data)
-head(stacked_data[,c('unit','period','cohort_period', 'time_to_treatment','df','bracket_df')],20)
-summary(stacked_data$time_to_treatment)
+head(stacked_data[df==2,c('unit','period','cohort_period', 'time_since_treat','df','bracket_df')],100)
+summary(stacked_data$time_since_treat)
 summary(stacked_data$time_since_treat)
 
-setindex(stacked_data, NULL)
-# summary(stacked_data[treatment_group==0]$time_to_treatment) # for the untreated
-
-# stacked -----------------------------------------------------------------
-# setindex(stacked_data, NULL)
-# stacked_data[treatment_group==0, time_to_treatment := -1000] # for the untreated
+summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
 # Function ----------------------------------------------------------------
 run_model <- function(outcome_variable, MAX_WEEKS) {
@@ -194,32 +195,27 @@ run_model <- function(outcome_variable, MAX_WEEKS) {
   # fit the model (using REF_PERIOD and untreated people -1000 as reference levels)
   # i() generates a factor variable from time_to_treatment where the reference level is specified by the vector
   # unit^df and period^df are being treated as fixed effects. The ^df notation indicates that each unique combination of unit and df, and period and df, is getting its own fixed effect.
-  # outcome_variable = dv
+  
+  # outcome_variable = 'hrs_listened'
   # ref = REF_PERIODS
+  # REF_PERIODS = c(-2, REF_PERIODS)
   
   # Model
-  model_formula <- as.formula(paste(outcome_variable, "~ i(time_to_treatment, ref = REF_PERIODS) | 
+  model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = REF_PERIODS) | 
                                      unit^df + period^df"))
   
   model <- feols(model_formula, 
                  data = stacked_data, 
                  cluster = "bracket_df")
-  
-  stacked_data[, treat := cohort_period_2*period_2]
-  model_formula2 <- as.formula(paste(outcome_variable, "~ treat | 
-                                     unit^df + period^df"))
-  
-  model <- feols(model_formula2, 
-                 data = stacked_data, 
-                 cluster = "bracket_df")
-  # TODO: solve collinearity issue
+  summary(model)
   
   # Process results
   stacked <- broom::tidy(model,conf.int = TRUE) %>% 
     mutate(t =  as.double(str_replace(term, "time_to_treatment::", ""))) %>% 
     filter(t >= -1*MAX_WEEKS & t <= MAX_WEEKS) %>% 
     select(t, estimate, conf.low, conf.high) %>% 
-    bind_rows(tibble(t = REF_PERIOD, estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    bind_rows(tibble(t = REF_PERIODS[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    bind_rows(tibble(t = REF_PERIODS[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
     mutate(method = "stacked")
   write.csv(stacked,paste0(out_dir, outcome_variable, '_stacked.csv'))
   
@@ -265,7 +261,7 @@ run_model <- function(outcome_variable, MAX_WEEKS) {
   print(plot)
   
   # Simple model only with the treat step dummy
-  model_formula_simple <- as.formula(paste(outcome_variable, "~ sync_dummy  | 
+  model_formula_simple <- as.formula(paste(outcome_variable, "~ treat  | 
                                      unit^df + period^df"))
   
   model_simple <- feols(model_formula_simple, 
@@ -396,6 +392,102 @@ for(pop_metric in pop_metrics) {
                  stars = T, title = paste0('\n Heterogeneity analysis for ', pop_metric),
                  notes = "Filled in 0 for nontreated title votes num. Num votes and followers are at 1M.")
   }
+}
+
+
+
+
+# Stackedev -------------------------------------------------------------
+# A bit more simplislistic stacked DiD as this approach uses only never treated as the comparison
+# That is why the code is so simple
+
+# data: The data frame to use.
+# dv: Dependent variable.
+# iv: Independent variable(s).
+# cohort: The cohort variable.
+# time: The time variable.
+# never_treat: Variable indicating units never treated.
+# unit_fe: Unit fixed effects variable.
+# clust_unit: Clustering variable.
+# covariates: Other covariates.
+# other_fe: Other fixed effects to include.
+# interact_cov: Whether to interact covariates with the stack.
+
+
+data <- dt
+data[, never_treat := !(treatment_group)]
+data[, cohort := (cohort_period)]
+dv = 'hrs_listened'
+iv = 'treat'
+summary(data[never_treat==1]$treat)
+time = 'period'
+never_treat = 'never_treat'
+unit_fe = 'unit'
+clust_unit = 'unit'
+covariates = NULL
+other_fe = NULL
+
+# Define the stacked event study function
+stackedev <- function(data, dv, iv, cohort, time, never_treat, unit_fe, clust_unit, covariates = NULL, other_fe = NULL, interact_cov = FALSE) {
+  
+  # Check for never treated units
+  if (!all(data[[never_treat]] %in% c(0, 1))) {
+    stop("Error: Stacked event study requires never treated comparison units.")
+  }
+  
+  # Creating stacks for each treated cohort of units
+  t_vals <- unique(data[never_treat != 1]$cohort)
+  
+  # Initialize an empty list to store stack data.tables
+  stack_list <- list()
+  
+  for (i in t_vals) {
+    cat("**** Building Stack", i, "****\n")
+    # Generate the stack for the current cohort
+    stack_data <- data[cohort == i | never_treat == 1, ]
+    stack_data[, stack := i]
+    # Add to the list
+    stack_list[[as.character(i)]] <- stack_data
+  }
+  
+  # Appending together each stack
+  cat("**** Appending Stacks ****\n")
+  all_stacks <- rbindlist(stack_list, use.names = TRUE)
+  
+  # Creating variable to estimate unit by stack variances
+  all_stacks[, unit_stack := stack * get(clust_unit)]
+  
+  # Allowing covariates to be interacted with stack
+  if (interact_cov) {
+    for (cov in covariates) {
+      all_stacks[[cov]] <- all_stacks[[cov]] * all_stacks$stack
+    }
+  }
+  
+  # Estimating model with fixed effects
+  cat("**** Estimating Model with feols (fixest package) ****\n")
+  
+  # Construct the formula string piece by piece
+  formula_parts <- c(dv, "~", iv)
+  if (!is.null(covariates)) {
+    formula_parts <- c(formula_parts, "+", paste(covariates, collapse = " + "))
+  }
+  formula_parts <- c(formula_parts, "|", unit_fe, "##stack", "+", time, "##stack")
+  if (!is.null(other_fe)) {
+    formula_parts <- c(formula_parts, "+", paste(other_fe, collapse = " + "))
+  }
+  
+  # Now create the formula
+  fe_formula <- as.formula(paste(formula_parts, collapse = " "))
+  
+  
+  feols_result <- feols(fe_formula, data = all_stacks, cluster = ~ unit_stack)
+  print(summary(feols_result))
+  
+  # Clean up
+  all_stacks[, c("stack", "unit_stack") := NULL]
+  
+  return(feols_result)
 }
 
 

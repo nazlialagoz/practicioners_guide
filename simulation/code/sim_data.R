@@ -17,7 +17,8 @@ set.seed(123)
 
 # Utilities: set theme and choose a palette for the graphs
 theme_set(theme_clean() + theme(plot.background = element_blank()))
-cbPalette <- c("#0072B2", "#D55E00")
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
 
 # Initiate the data -----------------------------------------------------------
 # Create a function that takes in the number of units, the number of periods,
@@ -76,7 +77,7 @@ sim_data <- function(...){
   data <- as.data.table(init_data(num_unit = 1000, 
                                   num_period = 5, 
                                   tau = 1.00, 
-                                  cohort_periods = c(2,3),
+                                  cohort_periods = c(2,3,4,5),
                                   constant = constant))
   
   setnames(data, 'dep_var', 'hrs_listened')
