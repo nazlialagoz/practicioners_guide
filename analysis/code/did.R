@@ -25,34 +25,79 @@ dt[, .(mean_hrs_listened = mean(hrs_listened)), by = cohort_period]
 # Visualize the outcome variable -----------------------------------------------
 avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
 
-ggplot(avg_dv_period, aes(fill=factor(cohort_period), y=mean_hrs_listened, x=period)) + 
-  geom_bar(position=position_dodge2(), stat="identity") +  coord_cartesian(ylim=c(79,85))+
-  labs(x = "Period", y = "Hours", title = 'Average music listening (hours)', 
-       caption = 'Cohort 2 is the early treated, and cohort 3 is the late treated group.',
-       subtitle = 'Treatment effect heterogeneity across cohorts') + 
-  theme(legend.position = 'bottom',
-        axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12)) + scale_fill_manual(values=cbPalette) +
-  geom_vline(xintercept = 1.5, color = '#0072B2', lty = 5)+
-  geom_vline(xintercept = 2.5, color = '#D55E00', lty = 5) + 
-  geom_text(label = 'Cohort period 2 is treated',aes(1.4,83), color = '#0072B2', angle = 90)+
-  geom_text(label = 'Cohort period 3 is treated',aes(2.4,83), color = '#D55E00', angle = 90) +
-  guides(fill=guide_legend(title="Treatment cohort period"))
+# Convert 'cohort_period' to a factor to have discrete color scale in the plot
+avg_dv_period[, cohort_period := as.factor(cohort_period)]
 
-# Visualize treatment effects
+# Plot
+ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_period, color = cohort_period)) +
+  geom_line() +
+  geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period), linetype = "dashed") +
+  scale_color_discrete(name = "Cohort Period") +
+  labs(title = "Trends in Mean Hours Listened by Cohort Period",
+       x = "Period",
+       y = "Mean Hours Listened") +
+  theme_minimal()
+ggsave(paste(out_dir, 'plot_outcome_by_cohort_period.png'))
+
+
+# Black and white friendly
+# Define the linetypes and shapes based on the number of unique cohort_periods
+line_types <- c("solid", "dashed", "dotted", "twodash", "longdash")
+shapes <- c(16, 17, 18, 19, 15)  # Filled shapes
+num_cohorts <- length(unique(avg_dv_period$cohort_period))
+line_types <- line_types[1:num_cohorts]
+shapes <- shapes[1:num_cohorts]
+
+# Plot
+gg <- ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_period)) +
+  geom_line(aes(linetype = cohort_period)) +
+  geom_point(aes(shape = cohort_period)) +
+  geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period, linetype = cohort_period), color = "black") +
+  scale_linetype_manual(values = line_types) +
+  scale_shape_manual(values = shapes) +
+  labs(title = "Trends in Mean Hours Listened by Cohort Period",
+       x = "Period",
+       y = "Mean Hours Listened",
+       linetype = "Cohort Period",
+       shape = "Cohort Period") +
+  theme_minimal()
+
+# Set color blindness-friendly palette for digital version and print
+gg <- gg + scale_color_brewer(palette = "Dark2", name = "Cohort Period")
+
+print(gg)
+ggsave(paste(out_dir, 'plot_outcome_by_cohort_period_bw.png'))
+
+
+# Plot true treatment effects --------------------------------------------------
 avg_treat_period <- dt[treat == 1, .(mean_treat_effect = mean(tau_cum)), by = c('cohort_period','period')]
+# Convert 'cohort_period' to a factor for discrete fill patterns
+avg_treat_period[, cohort_period := as.factor(cohort_period)]
+
+# Color plot
 plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat_effect, x=period)) + 
+  scale_fill_brewer(palette = "Set1") + # Color palette
   geom_bar(position=position_dodge2(preserve = "single"), stat="identity") +  
   labs(x = "Period", y = "Hours", title = 'True treatment effects (hrs)',
-       caption = 'Cohort 2 is the early treated and cohort 3 is the late treated group.',
        subtitle = 'Treatment effect heterogeneity across cohorts') + 
   theme(legend.position = 'bottom',
         axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12)) + scale_fill_manual(values=cbPalette) + 
+        axis.text = element_text(size = 12)) +
   guides(fill=guide_legend(title="Treatment cohort period")) + 
-  scale_x_continuous(breaks = unique(dt$period)) + 
+  scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
   scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect)))
 plot_te
+
+ggsave(paste(out_dir, 'plot_true_te_by_cohort_period.png'))
+
+# Create a grayscale plot
+grayscale_plot <- plot_te +
+  scale_fill_grey(start = 0.8, end = 0.2) + # Grayscale fill
+  labs(title = "True Treatment Effects by Cohort Period and Period (Grayscale)")
+grayscale_plot
+
+ggsave(paste(out_dir, 'plot_true_te_by_cohort_period_bw.png'))
+
 
 
 # A) Canonical DiD -------------------------------------------------------------
@@ -198,7 +243,7 @@ run_model <- function(outcome_variable, MAX_WEEKS) {
   
   # outcome_variable = 'hrs_listened'
   # ref = REF_PERIODS
-  # REF_PERIODS = c(-2, REF_PERIODS)
+  # REF_PERIODS = c(-2,-1, REF_PERIODS)
   
   # Model
   model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = REF_PERIODS) | 
