@@ -363,5 +363,211 @@ gg <- ggarrange(output_nplaylist$plot, output_sumfollow$plot,
 gg
 ggexport(gg,filename = paste0(out_dir,"reg_main_all_plots.png"))
 
+
+# Weighted pverall ATT for nplaylist
+# (weighted or not the estimates are really close so continue unweighted)
+stacked_treat <- output_nplaylist$stacked_treat
+obs_num_t <- c()
+for(i in 0:(length(stacked_treat$t)-1)){
+  N_t = unq_len(stacked_data[cohort_period != 10000 & time_to_treatment==i]$unit)
+  obs_num_t <- c(obs_num_t, N_t)
+}
+obs_num_t<-(as.data.table(obs_num_t))
+
+obs_num_t[, total_N := sum(obs_num_t)]
+obs_num_t[, weight := obs_num_t/total_N]
+stopifnot(sum(obs_num_t$weight)==1)
+
+stacked_treat <-cbind(stacked_treat,obs_num_t[,c('weight')])
+stacked_treat[, weighted_estimate :=estimate*weight]
+stacked_treat[, weighted_var := (weight^2)*var]
+overall_ATT_weighted = round(sum(stacked_treat$weighted_estimate),3)
+# The SE for average of N r.v.'s = 1/N * sqrt(sum of variences of r.v.s)
+overall_ATT_weighted_SE = sqrt(sum(stacked_treat$weighted_var))
+overall_ATT_weighted_t_value = (overall_ATT_weighted/overall_ATT_weighted_SE)
+overall_ATT_weighted_p_value <- round(2 * (1 - pnorm(abs(overall_ATT_weighted_t_value))),3)  # the abs() function takes the absolute value of the z-score
+
+sig_stars = ''
+if(overall_ATT_weighted_p_value <= .05){
+  sig_stars = '*'
+}
+subtitle_weighted = paste0('Overall ATT = ', overall_ATT_weighted, sig_stars,
+                           ' (p-value = ', overall_ATT_weighted_p_value, ')')
+
+
+# Heterogeneity -----------------------------------------------------------
+run_model_cov <- function(outcome_variable, MAX_WEEKS, cov) {
+  model_formula <- as.formula(paste(outcome_variable, "~ sync_dummy +
+                                      sync_dummy:",cov," | 
+                                     unit^df + period^df"))
+  
+  model <- feols(model_formula, 
+                 data = stacked_data, 
+                 cluster = "bracket_df")
+  print(summary(model))
+  
+  return(model)
+}
+# ps. for title pop. nontreat is NA
+models_cov <- list()
+dvs <- dv
+covs <- c('n_playlist_inclusion_earliest','sumfollowers_earliest', 'song_age_yr','title_numVotes') # shouldn't be song age year and title num votes also be omitted as they are constant for each song.
+
+for(dv in dvs){
+  for(cov in covs){
+    model <- run_model_cov(dv, MAX_WEEKS, cov)
+    models_cov[[paste0(dv,'X',cov)]] <- model
+  }
+}
+
+# Summarize these results in 1 - 2 tables
+names(models_cov)
+
+modelsummary(models_cov[1:3])
+
+### Include all covs at once, except title num votes becuase that one can only be among treated. 
+unique(stacked_data[treatment_group==1 & is.na(title_numVotes)]$title)
+# We can analyze 
+stacked_data[treatment_group==0, title_numVotes := 0]
+
+run_model_cov_all <- function(outcome_variable, MAX_WEEKS,pop_metric) {
+  
+  # outcome_variable = "sumfollowers_log"
+  # outcome_variable = "n_playlist_inclusion_log"
+  model_formula <- as.formula(paste(outcome_variable, "~ sync_dummy +
+                                      sync_dummy:",pop_metric," +
+                                      sync_dummy:song_age_yr +
+                                      sync_dummy:title_numVotes| 
+                                      unit^df + period^df"))
+  
+  model <- feols(model_formula, 
+                 data = stacked_data, 
+                 cluster = "bracket_df")
+  print(summary(model))
+  
+  return(model)
+}
+
+
+models_cov_all <- list()
+dvs <- dv
+pop_metrics <- c('n_playlist_inclusion_earliest','sumfollowers_earliest')
+
+# Iterate over both dependent variables and population metrics
+for(dv in dvs) {
+  for(pop_metric in pop_metrics) {
+    model <- run_model_cov_all(dv, MAX_WEEKS, pop_metric) # Assuming pop_metric is a single value
+    models_cov_all[[paste0(dv,'X',pop_metric)]] <- model
+  }
+}
+
+# Summarize these results in separate tables for each popularity metric
+for(pop_metric in pop_metrics) {
+  models_subset <- models_cov_all[names(models_cov_all) %like% (pop_metric)]
+  for(fmt in c('txt','tex')) {
+    modelsummary(models_subset, 
+                 output = paste0(out_dir, 'reg_covs_all_', pop_metric, '.', fmt),
+                 stars = T, title = paste0('\n Heterogeneity analysis for ', pop_metric),
+                 notes = "Filled in 0 for nontreated title votes num. Num votes and followers are at 1M.")
+  }
+}
+
+
+
+
+# Stackedev -------------------------------------------------------------
+# A bit more simplislistic stacked DiD as this approach uses only never treated as the comparison
+# That is why the code is so simple
+
+# data: The data frame to use.
+# dv: Dependent variable.
+# iv: Independent variable(s).
+# cohort: The cohort variable.
+# time: The time variable.
+# never_treat: Variable indicating units never treated.
+# unit_fe: Unit fixed effects variable.
+# clust_unit: Clustering variable.
+# covariates: Other covariates.
+# other_fe: Other fixed effects to include.
+# interact_cov: Whether to interact covariates with the stack.
+
+
+data <- dt
+data[, never_treat := !(treatment_group)]
+data[, cohort := (cohort_period)]
+dv = 'hrs_listened'
+iv = 'treat'
+summary(data[never_treat==1]$treat)
+time = 'period'
+never_treat = 'never_treat'
+unit_fe = 'unit'
+clust_unit = 'unit'
+covariates = NULL
+other_fe = NULL
+
+# Define the stacked event study function
+stackedev <- function(data, dv, iv, cohort, time, never_treat, unit_fe, clust_unit, covariates = NULL, other_fe = NULL, interact_cov = FALSE) {
+  
+  # Check for never treated units
+  if (!all(data[[never_treat]] %in% c(0, 1))) {
+    stop("Error: Stacked event study requires never treated comparison units.")
+  }
+  
+  # Creating stacks for each treated cohort of units
+  t_vals <- unique(data[never_treat != 1]$cohort)
+  
+  # Initialize an empty list to store stack data.tables
+  stack_list <- list()
+  
+  for (i in t_vals) {
+    cat("**** Building Stack", i, "****\n")
+    # Generate the stack for the current cohort
+    stack_data <- data[cohort == i | never_treat == 1, ]
+    stack_data[, stack := i]
+    # Add to the list
+    stack_list[[as.character(i)]] <- stack_data
+  }
+  
+  # Appending together each stack
+  cat("**** Appending Stacks ****\n")
+  all_stacks <- rbindlist(stack_list, use.names = TRUE)
+  
+  # Creating variable to estimate unit by stack variances
+  all_stacks[, unit_stack := stack * get(clust_unit)]
+  
+  # Allowing covariates to be interacted with stack
+  if (interact_cov) {
+    for (cov in covariates) {
+      all_stacks[[cov]] <- all_stacks[[cov]] * all_stacks$stack
+    }
+  }
+  
+  # Estimating model with fixed effects
+  cat("**** Estimating Model with feols (fixest package) ****\n")
+  
+  # Construct the formula string piece by piece
+  formula_parts <- c(dv, "~", iv)
+  if (!is.null(covariates)) {
+    formula_parts <- c(formula_parts, "+", paste(covariates, collapse = " + "))
+  }
+  formula_parts <- c(formula_parts, "|", unit_fe, "##stack", "+", time, "##stack")
+  if (!is.null(other_fe)) {
+    formula_parts <- c(formula_parts, "+", paste(other_fe, collapse = " + "))
+  }
+  
+  # Now create the formula
+  fe_formula <- as.formula(paste(formula_parts, collapse = " "))
+  
+  
+  feols_result <- feols(fe_formula, data = all_stacks, cluster = ~ unit_stack)
+  print(summary(feols_result))
+  
+  # Clean up
+  all_stacks[, c("stack", "unit_stack") := NULL]
+  
+  return(feols_result)
+}
+
+
 # Beep -------------
 beep()
