@@ -88,16 +88,39 @@ plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat
   scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect)))
 plot_te
 
+
 ggsave(paste(out_dir, 'plot_true_te_by_cohort_period.png'))
 
 # Create a grayscale plot
 grayscale_plot <- plot_te +
   scale_fill_grey(start = 0.8, end = 0.2) + # Grayscale fill
-  labs(title = "True Treatment Effects by Cohort Period and Period (Grayscale)")
+  labs(title = "True Treatment Effects by Cohort Period and Period")
 grayscale_plot
 
 ggsave(paste(out_dir, 'plot_true_te_by_cohort_period_bw.png'))
 
+# Plot avg TE by time since treatment ------------------------------------------
+# Calculate avg te by period
+avg_treat_period[, time_since_treat := period-as.numeric(cohort_period)]
+avg_te_rel_time <- avg_treat_period[, .(mean_treat_effect = mean(mean_treat_effect)), by = time_since_treat]
+
+# overall avg
+avg = round(mean(avg_te_rel_time$mean_treat_effect),2)
+print(paste0('Overall avg TE: ', avg))
+
+# Create the grayscale bar graph with adjusted bar width
+ggplot(avg_te_rel_time, aes(x = time_since_treat, y = mean_treat_effect)) +
+  geom_bar(stat = "identity", fill = "gray", width = 0.5) +  # Adjust bar width here
+  geom_text(aes(label = round(mean_treat_effect, 2)), vjust = -0.3) +
+  scale_x_continuous(breaks = avg_te_rel_time$time_since_treat) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(x = "Time Since Treatment", y = "Mean Treatment Effect", 
+       title = "Mean Treatment Effect Over Time",
+       subtitle = paste('Overall avg. = ', avg)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggsave(paste(out_dir, 'plot_true_te_by_rel_period_bw.png'))
 
 
 # A) Canonical DiD -------------------------------------------------------------
@@ -115,16 +138,25 @@ sum(bacon_decomp$weight * bacon_decomp$estimate)
 # B) DiD with post-period-cohort specific TEs ----------------------------------
 
 # Drop periods where everyone is treated
-dt_did <- dt[period < 3]
+# First, find if there are any periods where everyone is treated
+# I.e., all the treat dummies equal to one and there is no treat dummy equal to 0 in this period
+periods_w_untreated <- sort(unique(dt[treat==0]$period)) # periods with at least some untreated
+all_periods <- c(sort(unique(dt$period))) 
+periods_all_treated <- setdiff(all_periods, periods_w_untreated)
+# If there are no periods where all treated, do nothing
+# Otherwise take only the periods before all is treated
+if(length(periods_all_treated)==0){
+  dt_did <- dt
+}else{
+  dt_did <- dt[period < periods_all_treated] # select periods before all is treated 
+}
 
 # Create dummy variables
 dt_did <- dt_did %>% 
   dummy_cols(select_columns = c("cohort_period", "period"))
 
-interact_covs <- 'cohort_period_2:period_2'
-
 # Regression
-formula <- as.formula(paste0('hrs_listened ~ ',interact_covs))
+formula <- as.formula(paste0('hrs_listened ~ treat'))
 model <- feols(formula,
                data = dt_did, panel.id = "unit",
                fixef = c("unit", "period"), cluster = "unit")
@@ -138,11 +170,12 @@ out <- att_gt(yname = "hrs_listened",
               xformla = ~1,
               data = dt,
               est_method = "reg",
-              control_group = 'notyettreated'
+              control_group = c("nevertreated", "notyettreated")
 )
 out
-es <- aggte(out, type = "dynamic")
+rel_period_effects <- aggte(out, type = "dynamic")
 group_effects <- aggte(out, type = "group")
+simple_effects <- aggte(out, type = "simple")
 ggdid(out)
 
 # Why the estimates are slightly different? 
