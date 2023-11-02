@@ -268,7 +268,7 @@ summary(stacked_data$time_since_treat)
 summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
 # Function ----------------------------------------------------------------
-run_model <- function(outcome_variable, MAX_WEEKS) {
+run_model <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
   
   # fit the model (using REF_PERIOD and untreated people -1000 as reference levels)
   # i() generates a factor variable from time_to_treatment where the reference level is specified by the vector
@@ -354,7 +354,7 @@ run_model <- function(outcome_variable, MAX_WEEKS) {
 }
 
 # Usage:
-output_stacked <- run_model(dv, MAX_WEEKS)
+output_stacked <- run_model(dv, MAX_WEEKS, REF_PERIODS)
 
 
 # Put graphs next to each other
@@ -362,6 +362,85 @@ gg <- ggarrange(output_nplaylist$plot, output_sumfollow$plot,
                 ncol=2, nrow=1, common.legend = TRUE, legend="bottom") 
 gg
 ggexport(gg,filename = paste0(out_dir,"reg_main_all_plots.png"))
+
+# Modular Functions ------------------------------------------------------
+
+# Model function
+run_stacked_did <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
+  # outcome_variable = 'hrs_listened'
+  # REF_PERIODS = c(-2, -999)
+  
+  # Model
+  model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = REF_PERIODS) | 
+                                     unit^df + period^df"))
+  
+  model <- feols(model_formula, 
+                 data = stacked_data, 
+                 cluster = "bracket_df")
+  print(summary(model))
+  return(model)
+}
+
+mod_stacked <- run_stacked_did(outcome_variable, MAX_WEEKS, REF_PERIODS)
+
+# Prepare and write model results to CSV
+save_model_results <- function(model, MAX_WEEKS, REF_PERIODS, out_dir) {
+  # Process results
+  stacked <- broom::tidy(model,conf.int = TRUE) %>% 
+    mutate(t =  as.double(str_replace(term, "time_since_treat::", ""))) %>% 
+    filter(t >= -1*MAX_WEEKS & t <= MAX_WEEKS) %>% 
+    select(t, estimate, conf.low, conf.high) %>% 
+    bind_rows(tibble(t = REF_PERIODS[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    bind_rows(tibble(t = REF_PERIODS[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    mutate(method = "stacked")
+  write.csv(stacked,paste0(out_dir,'mod_result', '_stacked.csv'))
+  return(stacked)
+}
+
+mod_stacked_df <- save_model_results(model=mod_stacked, MAX_WEEKS, REF_PERIODS, out_dir)
+mod_stacked_df
+
+# Generate plot from coefficients
+generate_plot <- function(coefs, MAX_WEEKS, outcome_variable, out_dir) {
+  # Plotting logic
+  # ... (plotting logic)
+  ggsave(file.path(out_dir, paste(outcome_variable, '_stacked_dynamic_max_period', MAX_WEEKS, '.png')))
+  return(plot)
+}
+
+# Function to run the model ------------------------------------------------
+run_model <- function(outcome_variable, MAX_WEEKS, REF_PERIODS, stacked_data, out_dir) {
+  # Check inputs
+  if (!is.character(outcome_variable) || !is.numeric(MAX_WEEKS) || !is.numeric(REF_PERIODS)) {
+    stop("Invalid input types.")
+  }
+  
+  if (!dir.exists(out_dir)) {
+    stop("Output directory does not exist.")
+  }
+  
+  # Model fitting logic remains the same ...
+  
+  # Save model results
+  save_model_results(model, MAX_WEEKS, REF_PERIODS, out_dir, outcome_variable)
+  
+  # Plot results
+  plot <- generate_plot(coefs, MAX_WEEKS, outcome_variable, out_dir)
+  
+  # Print summary of the simple model
+  # ... (simple model logic)
+  
+  # Prepare and return output
+  output <- list("stacked_treat" = stacked_treat, "plot" = plot, 'model' = model)
+  saveRDS(model, file.path(out_dir, paste(outcome_variable, '_stacked.rds')))
+  return(output)
+}
+
+# Example usage
+output_stacked <- run_model("hrs_listened", 52, c(-2, -999), stacked_data, "path/to/output/directory")
+
+# Put graphs next to each other
+# ... (existing logic)
 
 # Beep -------------
 beep()
