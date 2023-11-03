@@ -26,10 +26,16 @@ dt[, .(mean_hrs_listened = mean(hrs_listened)), by = cohort_period]
 dt[, time_since_treat := period-cohort_period]
 dt[cohort_period>max(period), time_since_treat:= -999] # nontreated group
 dt[, treatment_group:= ifelse(time_since_treat != -999, 1,0)] # nontreated group
+dt[treatment_group == 0, cohort_period := 999]
 sort(unique(dt$time_since_treat))
 
 unique(dt[time_since_treat == -999]$cohort_period)
 
+unq_rel_t <- sort(unique(dt$time_since_treat))
+most_neg_t <- min(setdiff(unq_rel_t,-999))
+ref_periods <- c(most_neg_t,-999) # TODO: change this into the most min one?
+# TODO: make other methods also take -4 as the ref OR simply use +/-2 weeks around treatment
+MAX_WEEKS = max(setdiff(unq_rel_t,-999))
 
 # Visualize the outcome variable -----------------------------------------------
 avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
@@ -195,13 +201,7 @@ simple_effects <- aggte(out, type = "simple")
 ggdid(out)
 
 # Convert result into df
-unq_rel_t <- sort(unique(dt$time_since_treat))
-most_neg_t <- min(setdiff(unq_rel_t,-999))
-ref_periods <- c(most_neg_t,-999) # TODO: change this into the most min one?
-# TODO: make other methods also take -4 as the ref OR simply use +/-2 weeks around treatment
-MAX_WEEKS = max(setdiff(unq_rel_t,-999))
-
-CS <- rel_period_effects %>% 
+mod_cs_df <- rel_period_effects %>% 
   tidy() %>% 
   rename(t = event.time) %>% 
   filter(t > -MAX_WEEKS & t <= MAX_WEEKS) %>% 
@@ -209,7 +209,7 @@ CS <- rel_period_effects %>%
   bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   mutate(method = "CS")
-write.csv(CS,paste0(out_dir, 'mod_CS_df.csv'))
+write.csv(mod_cs_df,paste0(out_dir, 'mod_CS_df.csv'))
 
 # Why the estimates are slightly different? 
   # est procedure & randomness?
@@ -242,7 +242,7 @@ mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>%
   bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   mutate(method = 'ETWFE_pkg')
-print(mod_etwfe_pkg_df)
+print(data.table(mod_etwfe_pkg_df))
 # Write to CSV
 write.csv(mod_etwfe_pkg_df, paste0(out_dir,'mod_result', '_ETWFE_pkg.csv'))
 
@@ -257,32 +257,33 @@ run_etwfe <- function(dv){
   saveRDS(twfe_ols, paste0(out_dir, dv, '_twfe.rds'))
   
   # Save results as df
-  export_reg_as_df(twfe_ols, dv, out_dir,method = 'etwfe', ref_periods = ref_periods)
+  export_reg_as_df(twfe_ols, dv, out_dir,method = 'ETWFE', ref_periods = ref_periods)
 }
 
 mod_etwfe_df <- data.table(run_etwfe(dv = dv))
+mod_etwfe_df
 
 # E) Stacked DiD ---------------------------------------------------------------
 head(dt)
 
 # Simple TWFE --------------------------------------------------------------
 # Define reference period: the most negative period
-MAX_WEEKS = 2 # indicates the time window around treatment
+MAX_WEEKS # indicates the time window around treatment
 sort(unique(dt$time_since_treat))
 dt <- dt[(treatment_group==0) | (time_since_treat>=-MAX_WEEKS & time_since_treat<=MAX_WEEKS)]
 
 # there are no untreated group so not c(REF_PERIOD, -999), ie. ref period the most neg and also untreated
-REF_PERIODS = c(-999, -2)
+ref_periods
 
 run_twfe <- function(dv){
-  formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = REF_PERIODS)")) 
+  formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = ref_periods)")) 
   twfe_ols <- feols(formula, data = dt, panel.id = "unit",
                     cluster = "unit", fixef = c("unit", "period"))
   print(summary(twfe_ols))
   saveRDS(twfe_ols, paste0(out_dir, dv, '_twfe.rds'))
   
   # Save results as df
-  export_reg_as_df(twfe_ols, dv, out_dir,method = 'twfe', ref_periods = REF_PERIODS)
+  export_reg_as_df(twfe_ols, dv, out_dir,method = 'TWFE', ref_periods = ref_periods)
 }
 
 mod_twfe_df <- data.table(run_twfe(dv = 'hrs_listened'))
@@ -290,12 +291,12 @@ mod_twfe_df <- data.table(run_twfe(dv = 'hrs_listened'))
 
 # Create stacked data -----------------------------------------------------
 ### for stacking
-groups <- unique(dt[cohort_period != 999]$cohort_period)
+groups <- unique(dt[treatment_group == 1]$cohort_period)
 
 sort(groups)
 sort(unique(dt$period))
 
-MAX_WEEKS = 2 # indicates the time window around treatment
+MAX_WEEKS # indicates the time window around treatment
 
 ### create stacked data
 getdata <- function(i) {
@@ -311,7 +312,7 @@ getdata <- function(i) {
     mutate(df = i) %>% 
     # mutate(time_to_treatment = period - cohort_period) %>% 
     # make dummies
-    mutate(time_since_treat = if_else(cohort_period == i, time_since_treat, -999)) # TODO: check this
+    mutate(time_since_treat = if_else(cohort_period == i, time_since_treat, -999)) # TODO: check this. why don't we do -999 only for the untreated
 }
 stacked_data <- map_df(groups, getdata) %>% 
   mutate(bracket_df = paste(unit,df))
@@ -321,13 +322,14 @@ head(stacked_data[df==2,c('unit','period','cohort_period', 'time_since_treat','d
 summary(stacked_data$time_since_treat)
 summary(stacked_data$time_since_treat)
 
+sort(unique(stacked_data$cohort_period))
 summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
 
 # Stacked DiD regressions
 
 outcome_variable = 'hrs_listened'
-REF_PERIODS = c(-2, -999)
+ref_periods
 
 run_stacked_did_simple <- function(outcome_variable) {
   # Define the model formula
@@ -344,12 +346,12 @@ run_stacked_did_simple <- function(outcome_variable) {
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
 
 # Model function
-run_stacked_did <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
+run_stacked_did <- function(outcome_variable, MAX_WEEKS, ref_periods) {
   # outcome_variable = 'hrs_listened'
-  # REF_PERIODS = c(-2, -999)
+  # ref_periods = c(-2, -999)
   
   # Model
-  model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = REF_PERIODS) | 
+  model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = ref_periods) | 
                                      unit^df + period^df"))
   
   model <- feols(model_formula, 
@@ -359,25 +361,25 @@ run_stacked_did <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
   return(model)
 }
 
-mod_stacked <- run_stacked_did(outcome_variable, MAX_WEEKS, REF_PERIODS)
+mod_stacked <- run_stacked_did(outcome_variable, MAX_WEEKS, ref_periods)
 
 # Prepare and write model results to CSV
-save_model_results <- function(model, MAX_WEEKS, REF_PERIODS, out_dir) {
+save_model_results <- function(model, MAX_WEEKS, ref_periods, out_dir) {
   # Process results
   stacked <- broom::tidy(model,conf.int = TRUE) %>% 
     mutate(t =  as.double(str_replace(term, "time_since_treat::", ""))) %>% 
     filter(t >= -1*MAX_WEEKS & t <= MAX_WEEKS) %>% 
     select(t, estimate, conf.low, conf.high) %>% 
-    bind_rows(tibble(t = REF_PERIODS[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-    bind_rows(tibble(t = REF_PERIODS[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-    mutate(method = "stacked")
+    bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+    mutate(method = "Stacked")
   stacked <- as.data.table(stacked)
   write.csv(stacked,paste0(out_dir,'mod_result', '_stacked.csv'))
   print(stacked)
   return(stacked)
 }
 
-mod_stacked_df <- save_model_results(model=mod_stacked, MAX_WEEKS, REF_PERIODS, out_dir)
+mod_stacked_df <- save_model_results(model=mod_stacked, MAX_WEEKS, ref_periods, out_dir)
 
 
 # Generate plot from coefficients
@@ -423,7 +425,13 @@ generate_stacked_plot <- function(mod_stacked_df, MAX_WEEKS, outcome_variable, o
   
   return(plot)
 }
-stacked_dyn_plot <- generate_plot(generate_stacked_plot, MAX_WEEKS, outcome_variable, out_dir)
+stacked_dyn_plot <- generate_stacked_plot(mod_stacked_df, MAX_WEEKS, outcome_variable, out_dir)
+
+
+# Graph all models --------------------------------------------------------
+# Put all the results df's togehter
+rbind(mod_twfe_df,mod_etwfe_df, mod_stacked_df,mod_etwfe_pkg_df, mod_cs_df)
+
 
 # Beep -------------
 beep()
