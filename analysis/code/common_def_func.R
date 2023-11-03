@@ -49,3 +49,14 @@ my_theme <- function() {
     text = element_text(size = 20)
   )
 }
+
+generate_significance_stars <- function(p_value) {
+  sig_stars <- ''
+  if(p_value <= 0.05) {
+    sig_stars <- '*'
+  }
+  return(sig_stars)
+}
+
+# Example usage:
+generate_significance_stars(0.04)

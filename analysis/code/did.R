@@ -267,103 +267,27 @@ summary(stacked_data$time_since_treat)
 
 summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
-# Function ----------------------------------------------------------------
-run_model <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
+
+# Stacked DiD regressions
+
+outcome_variable = 'hrs_listened'
+REF_PERIODS = c(-2, -999)
+
+run_stacked_did_simple <- function(outcome_variable) {
+  # Define the model formula
+  model_formula_simple <- as.formula(paste(outcome_variable, "~ treat | unit^df + period^df"))
   
-  # fit the model (using REF_PERIOD and untreated people -1000 as reference levels)
-  # i() generates a factor variable from time_to_treatment where the reference level is specified by the vector
-  # unit^df and period^df are being treated as fixed effects. The ^df notation indicates that each unique combination of unit and df, and period and df, is getting its own fixed effect.
+  # Fit the model using the 'feols' function from the 'fixest' package
+  model_simple <- feols(model_formula_simple, data = stacked_data, cluster = "bracket_df")
   
-  # outcome_variable = 'hrs_listened'
-  # ref = REF_PERIODS
-  # REF_PERIODS = c(-2, -999)
-  
-  # Model
-  model_formula <- as.formula(paste(outcome_variable, "~ i(time_since_treat, ref = REF_PERIODS) | 
-                                     unit^df + period^df"))
-  
-  model <- feols(model_formula, 
-                 data = stacked_data, 
-                 cluster = "bracket_df")
-  summary(model)
-  
-  # Process results
-  stacked <- broom::tidy(model,conf.int = TRUE) %>% 
-    mutate(t =  as.double(str_replace(term, "time_to_treatment::", ""))) %>% 
-    filter(t >= -1*MAX_WEEKS & t <= MAX_WEEKS) %>% 
-    select(t, estimate, conf.low, conf.high) %>% 
-    bind_rows(tibble(t = REF_PERIODS[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-    bind_rows(tibble(t = REF_PERIODS[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-    mutate(method = "stacked")
-  write.csv(stacked,paste0(out_dir, outcome_variable, '_stacked.csv'))
-  
-  # Regular avg. 
-  stacked <- as.data.table(stacked)
-  stacked_treat <- stacked[t>=0]
-  stacked_treat[, SE := (conf.high - estimate)/1.96] # given .95 conf level
-  stacked_treat[, var := SE^2]
-  overall_ATT = sum(stacked_treat$estimate)/length(stacked_treat$estimate)
-  overall_ATT_SE = (1/length(stacked_treat$estimate))*sqrt(sum(stacked_treat$var))
-  overall_ATT_t_value = overall_ATT/overall_ATT_SE
-  overall_ATT_p_value <- round(2 * (1 - pnorm(abs(overall_ATT_t_value))),3)  
-  
-  sig_stars = ''
-  if(overall_ATT_p_value <= .05){
-    sig_stars = '*'
-  }
-  subtitle = paste0('Overall ATT = ', round(overall_ATT,3), sig_stars,
-                    ' (p-value = ', overall_ATT_p_value, ')')
-  
-  # plot 
-  coefs <- bind_rows(stacked) 
-  
-  coef_min = MAX_WEEKS*-1 # the most min is the ref period thus anchored at 0
-  coef_max = MAX_WEEKS
-  
-  plot <- coefs[t>coef_min & t<=coef_max] %>% 
-    ggplot(aes(x = t, y = estimate, color = method)) + 
-    geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
-    geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), linewidth = 0.75) +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = .25, alpha = 0.75) + 
-    geom_vline(xintercept = -0.5, linetype = "dashed", linewidth = .25) +
-    scale_color_manual(name="Estimation Method", values= met.brewer("Cross", 8, "discrete")) +
-    theme(legend.position= 'bottom') +
-    labs(title = 'Event Time Estimates', y="ATT", x = "Relative Time", 
-         subtitle = subtitle, 
-         caption = '* indicates statistically significant at .05 significance level.') + 
-    guides(col = guide_legend(nrow = 3))+ scale_x_continuous(breaks= sort(coefs$t))
-  
-  # Save plot
-  ggsave(paste0(out_dir,outcome_variable,'_stacked_dynamic_max_period',MAX_WEEKS,'.png'))
-  
-  print(plot)
-  
-  # Simple model only with the treat step dummy
-  model_formula_simple <- as.formula(paste(outcome_variable, "~ treat  | 
-                                     unit^df + period^df"))
-  
-  model_simple <- feols(model_formula_simple, 
-                        data = stacked_data, 
-                        cluster = "bracket_df")
-  
-  print(summary(model_simple)) # seems like with sole sync dummy the estimate is the same as regular twfe. ~.02 and very sig. for both outcomes
-  
-  output <- list("stacked_treat" = stacked_treat, "plot" = plot, 'model' = model)
-  saveRDS(model, paste0(out_dir, outcome_variable, '_stacked.rds'))
-  return(output)
+  # Print the summary of the model
+  print(summary(model_simple)) 
+  return(model_simple)
 }
 
-# Usage:
-output_stacked <- run_model(dv, MAX_WEEKS, REF_PERIODS)
+mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
 
 
-# Put graphs next to each other
-gg <- ggarrange(output_nplaylist$plot, output_sumfollow$plot,
-                ncol=2, nrow=1, common.legend = TRUE, legend="bottom") 
-gg
-ggexport(gg,filename = paste0(out_dir,"reg_main_all_plots.png"))
-
-# Modular Functions ------------------------------------------------------
 
 # Model function
 run_stacked_did <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {
@@ -393,54 +317,59 @@ save_model_results <- function(model, MAX_WEEKS, REF_PERIODS, out_dir) {
     bind_rows(tibble(t = REF_PERIODS[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
     bind_rows(tibble(t = REF_PERIODS[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
     mutate(method = "stacked")
+  stacked <- as.data.table(stacked)
   write.csv(stacked,paste0(out_dir,'mod_result', '_stacked.csv'))
+  print(stacked)
   return(stacked)
 }
 
 mod_stacked_df <- save_model_results(model=mod_stacked, MAX_WEEKS, REF_PERIODS, out_dir)
-mod_stacked_df
+
 
 # Generate plot from coefficients
-generate_plot <- function(coefs, MAX_WEEKS, outcome_variable, out_dir) {
+generate_stacked_plot <- function(mod_stacked_df, MAX_WEEKS, outcome_variable, out_dir) {
   # Plotting logic
-  # ... (plotting logic)
-  ggsave(file.path(out_dir, paste(outcome_variable, '_stacked_dynamic_max_period', MAX_WEEKS, '.png')))
+  
+  # Regular avg. TE
+  stacked_treat <- mod_stacked_df[t>=0]
+  stacked_treat[, SE := (conf.high - estimate)/1.96] # given .95 conf level
+  stacked_treat[, var := SE^2]
+  overall_ATT = sum(stacked_treat$estimate)/length(stacked_treat$estimate)
+  overall_ATT_SE = (1/length(stacked_treat$estimate))*sqrt(sum(stacked_treat$var))
+  overall_ATT_t_value = overall_ATT/overall_ATT_SE
+  overall_ATT_p_value <- round(2 * (1 - pnorm(abs(overall_ATT_t_value))),3)  
+  
+  subtitle = paste0('Overall ATT = ', round(overall_ATT,3), 
+                    generate_significance_stars(overall_ATT_p_value),
+                    ' (p-value = ', overall_ATT_p_value, ')')
+  
+  # plot 
+  coefs <- bind_rows(mod_stacked_df) 
+  
+  # coef_min = MAX_WEEKS*-1 # the most min is the ref period thus anchored at 0
+  # coef_max = MAX_WEEKS
+  
+  plot <- coefs[t>=-MAX_WEEKS & t<=MAX_WEEKS] %>% 
+    ggplot(aes(x = t, y = estimate, color = method)) + 
+    geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
+    geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), linewidth = 0.75) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = .25, alpha = 0.75) + 
+    geom_vline(xintercept = -0.5, linetype = "dashed", linewidth = .25) +
+    scale_color_manual(name="Estimation Method", values= met.brewer("Cross", 8, "discrete")) +
+    theme(legend.position= 'bottom') +
+    labs(title = 'Event Time Estimates', y="ATT", x = "Relative Time", 
+         subtitle = subtitle, 
+         caption = '* indicates statistically significant at .05 significance level.') + 
+    scale_x_continuous(breaks= sort(coefs$t))
+  
+  print(plot)
+  
+  # Save plot
+  ggsave(paste0(out_dir,'_stacked_dynamic_max_period',MAX_WEEKS,'.png'))
+  
   return(plot)
 }
-
-# Function to run the model ------------------------------------------------
-run_model <- function(outcome_variable, MAX_WEEKS, REF_PERIODS, stacked_data, out_dir) {
-  # Check inputs
-  if (!is.character(outcome_variable) || !is.numeric(MAX_WEEKS) || !is.numeric(REF_PERIODS)) {
-    stop("Invalid input types.")
-  }
-  
-  if (!dir.exists(out_dir)) {
-    stop("Output directory does not exist.")
-  }
-  
-  # Model fitting logic remains the same ...
-  
-  # Save model results
-  save_model_results(model, MAX_WEEKS, REF_PERIODS, out_dir, outcome_variable)
-  
-  # Plot results
-  plot <- generate_plot(coefs, MAX_WEEKS, outcome_variable, out_dir)
-  
-  # Print summary of the simple model
-  # ... (simple model logic)
-  
-  # Prepare and return output
-  output <- list("stacked_treat" = stacked_treat, "plot" = plot, 'model' = model)
-  saveRDS(model, file.path(out_dir, paste(outcome_variable, '_stacked.rds')))
-  return(output)
-}
-
-# Example usage
-output_stacked <- run_model("hrs_listened", 52, c(-2, -999), stacked_data, "path/to/output/directory")
-
-# Put graphs next to each other
-# ... (existing logic)
+stacked_dyn_plot <- generate_plot(generate_stacked_plot, MAX_WEEKS, outcome_variable, out_dir)
 
 # Beep -------------
 beep()
