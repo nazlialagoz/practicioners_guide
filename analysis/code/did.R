@@ -220,7 +220,7 @@ write.csv(CS,paste0(out_dir, 'mod_CS_df.csv'))
 # D) ETWFE       ---------------------------------------------------------------
 dt[, time_since_treat_min1 := as.integer(time_since_treat==-1)]
 
-mod_etwfe =
+mod_etwfe_pkg =
   etwfe(
     fml  = hrs_listened ~ time_since_treat_min1, # outcome ~ controls
     tvar = period,        # time variable
@@ -228,11 +228,11 @@ mod_etwfe =
     data = dt,       # dataset
     vcov = ~unit  # vcov adjustment (here: clustered)
   )
-summary(mod_etwfe)
-mod_etwfe$collin.var
+summary(mod_etwfe_pkg)
+mod_etwfe_pkg$collin.var
 
 # Put the results into a DF
-results <- broom::tidy(mod_etwfe, conf.int = TRUE) %>% 
+mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>% 
   mutate(t = as.numeric(sub(".*::(.):period::(.*).*", "\\2", term)) -
            as.numeric(sub(".*cohort_period::(.):.*", "\\1", term))) %>%
   select(-term) %>%
@@ -241,10 +241,10 @@ results <- broom::tidy(mod_etwfe, conf.int = TRUE) %>%
   select(t, estimate, conf.low, conf.high) %>% 
   bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-  mutate(method = 'ETWFE')
-
+  mutate(method = 'ETWFE_pkg')
+print(mod_etwfe_pkg_df)
 # Write to CSV
-write.csv(results, paste0(out_dir,'mod_result', '_ETWFE.csv'))
+write.csv(mod_etwfe_pkg_df, paste0(out_dir,'mod_result', '_ETWFE_pkg.csv'))
 
 # TODO: do we need to try hand written one to see if we can have -1 period?
 # Manual ETWFE
