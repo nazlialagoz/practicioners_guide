@@ -195,9 +195,11 @@ simple_effects <- aggte(out, type = "simple")
 ggdid(out)
 
 # Convert result into df
-ref_periods <- c(-2,-999) 
+unq_rel_t <- sort(unique(dt$time_since_treat))
+most_neg_t <- min(setdiff(unq_rel_t,-999))
+ref_periods <- c(most_neg_t,-999) # TODO: change this into the most min one?
 # TODO: make other methods also take -4 as the ref OR simply use +/-2 weeks around treatment
-MAX_WEEKS = 2
+MAX_WEEKS = max(setdiff(unq_rel_t,-999))
 
 CS <- rel_period_effects %>% 
   tidy() %>% 
@@ -230,7 +232,6 @@ summary(mod_etwfe)
 mod_etwfe$collin.var
 
 # Put the results into a DF
-ref_periods = c(-999,-2)
 results <- broom::tidy(mod_etwfe, conf.int = TRUE) %>% 
   mutate(t = as.numeric(sub(".*::(.):period::(.*).*", "\\2", term)) -
            as.numeric(sub(".*cohort_period::(.):.*", "\\1", term))) %>%
@@ -246,6 +247,20 @@ results <- broom::tidy(mod_etwfe, conf.int = TRUE) %>%
 write.csv(results, paste0(out_dir,'mod_result', '_ETWFE.csv'))
 
 # TODO: do we need to try hand written one to see if we can have -1 period?
+# Manual ETWFE
+dv = 'hrs_listened'
+run_etwfe <- function(dv){
+  formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = ref_periods)")) 
+  twfe_ols <- feols(formula, data = dt, panel.id = "unit",
+                    cluster = "unit", fixef = c("unit", "period"))
+  print(summary(twfe_ols))
+  saveRDS(twfe_ols, paste0(out_dir, dv, '_twfe.rds'))
+  
+  # Save results as df
+  export_reg_as_df(twfe_ols, dv, out_dir,method = 'etwfe', ref_periods = ref_periods)
+}
+
+mod_etwfe_df <- data.table(run_etwfe(dv = dv))
 
 # E) Stacked DiD ---------------------------------------------------------------
 head(dt)

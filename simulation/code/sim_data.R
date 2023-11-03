@@ -75,9 +75,9 @@ init_data <- function(num_unit, num_period, tau, cohort_periods, constant){
 sim_data <- function(...){
   constant = 80
   data <- as.data.table(init_data(num_unit = 1000, 
-                                  num_period = 5, 
+                                  num_period = 10, 
                                   tau = 1.00, 
-                                  cohort_periods = c(2,3,4,5),
+                                  cohort_periods = c(2,3,4,5,99,100,101),
                                   constant = constant))
   
   setnames(data, 'dep_var', 'hrs_listened')
