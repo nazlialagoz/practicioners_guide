@@ -22,6 +22,15 @@ kable(summary(dt[, ..select_cols]), 'simple')
 dt[, .N, by = cohort_period] # group sizes
 dt[, .(mean_hrs_listened = mean(hrs_listened)), by = cohort_period]
 
+# Create relative time dummy
+dt[, time_since_treat := period-cohort_period]
+dt[cohort_period>max(period), time_since_treat:= -999] # nontreated group
+dt[, treatment_group:= ifelse(time_since_treat != -999, 1,0)] # nontreated group
+sort(unique(dt$time_since_treat))
+
+unique(dt[time_since_treat == -999]$cohort_period)
+
+
 # Visualize the outcome variable -----------------------------------------------
 avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
 
@@ -162,14 +171,21 @@ model <- feols(formula,
                fixef = c("unit", "period"), cluster = "unit")
 summary(model) 
 
+
+
 # C) did package by Santanna & Callaway ----------------------------------------
+
+dt_cs <- copy(dt)
+dt_cs[treatment_group == 0, cohort_period := 0] # according to the pkg instructions
+
 out <- att_gt(yname = "hrs_listened",
               gname = "cohort_period",
               idname = "unit",
               tname = "period",
               xformla = ~1,
-              data = dt,
+              data = dt_cs,
               est_method = "reg",
+              allow_unbalanced_panel = T,
               control_group = c("nevertreated", "notyettreated")
 )
 out
@@ -178,6 +194,21 @@ group_effects <- aggte(out, type = "group")
 simple_effects <- aggte(out, type = "simple")
 ggdid(out)
 
+# Convert result into df
+ref_periods <- c(-2,-999) 
+# TODO: make other methods also take -4 as the ref OR simply use +/-2 weeks around treatment
+MAX_WEEKS = 2
+
+CS <- rel_period_effects %>% 
+  tidy() %>% 
+  rename(t = event.time) %>% 
+  filter(t > -MAX_WEEKS & t <= MAX_WEEKS) %>% 
+  select(t, estimate, conf.low, conf.high) %>% 
+  bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+  bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+  mutate(method = "CS")
+write.csv(CS,paste0(out_dir, 'mod_CS_df.csv'))
+
 # Why the estimates are slightly different? 
   # est procedure & randomness?
   # Also did package reports simult. conf band. 
@@ -185,36 +216,48 @@ ggdid(out)
   # Thus the diff in the significance in addition to diff in the SEs
 
 # D) ETWFE       ---------------------------------------------------------------
-dt
+dt[, time_since_treat_min1 := as.integer(time_since_treat==-1)]
+
 mod_etwfe =
   etwfe(
-    fml  = hrs_listened ~ 1, # outcome ~ controls
+    fml  = hrs_listened ~ time_since_treat_min1, # outcome ~ controls
     tvar = period,        # time variable
     gvar = cohort_period, # group variable
     data = dt,       # dataset
     vcov = ~unit  # vcov adjustment (here: clustered)
   )
 summary(mod_etwfe)
+mod_etwfe$collin.var
+
+# Put the results into a DF
+ref_periods = c(-999,-2)
+results <- broom::tidy(mod_etwfe, conf.int = TRUE) %>% 
+  mutate(t = as.numeric(sub(".*::(.):period::(.*).*", "\\2", term)) -
+           as.numeric(sub(".*cohort_period::(.):.*", "\\1", term))) %>%
+  select(-term) %>%
+  relocate(t, .before = estimate) %>%
+  # filter(t >= -1*max_t & t <= max_t) %>% 
+  select(t, estimate, conf.low, conf.high) %>% 
+  bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+  bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
+  mutate(method = 'ETWFE')
+
+# Write to CSV
+write.csv(results, paste0(out_dir,'mod_result', '_ETWFE.csv'))
+
+# TODO: do we need to try hand written one to see if we can have -1 period?
 
 # E) Stacked DiD ---------------------------------------------------------------
 head(dt)
 
-# Create relative time dummy
-dt[, time_since_treat := period-cohort_period]
-dt[cohort_period>max(period), time_since_treat:= -999] # nontreated group
-dt[, treatment_group:= ifelse(time_since_treat != -999, 1,0)] # nontreated group
-sort(unique(dt$time_since_treat))
-
-unique(dt[time_since_treat == -999]$cohort_period)
-dt[time_since_treat == -999, cohort_period := 999]
-
-
 # Simple TWFE --------------------------------------------------------------
 # Define reference period: the most negative period
-REF_PERIOD = min(unique(dt[cohort_period!=999]$time_since_treat))
+MAX_WEEKS = 2 # indicates the time window around treatment
+sort(unique(dt$time_since_treat))
+dt <- dt[(treatment_group==0) | (time_since_treat>=-MAX_WEEKS & time_since_treat<=MAX_WEEKS)]
 
 # there are no untreated group so not c(REF_PERIOD, -999), ie. ref period the most neg and also untreated
-REF_PERIODS = c(-999, REF_PERIOD)
+REF_PERIODS = c(-999, -2)
 
 run_twfe <- function(dv){
   formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = REF_PERIODS)")) 
@@ -227,10 +270,8 @@ run_twfe <- function(dv){
   export_reg_as_df(twfe_ols, dv, out_dir,method = 'twfe', ref_periods = REF_PERIODS)
 }
 
-run_twfe(dv = 'hrs_listened')
+mod_twfe_df <- data.table(run_twfe(dv = 'hrs_listened'))
 
-
-dv = 'hrs_listened'
 
 # Create stacked data -----------------------------------------------------
 ### for stacking
@@ -286,8 +327,6 @@ run_stacked_did_simple <- function(outcome_variable) {
 }
 
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
-
-
 
 # Model function
 run_stacked_did <- function(outcome_variable, MAX_WEEKS, REF_PERIODS) {

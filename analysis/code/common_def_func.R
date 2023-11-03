@@ -36,7 +36,7 @@ export_reg_as_df <- function(model, dv, out_dir,method, ref_periods) {
   write.csv(results, paste0(out_dir, dv, '',method,'.csv'))
   
   # Return the results
-  return(results)
+  return((results))
 }
 
 # Define preferred ggplot theme
