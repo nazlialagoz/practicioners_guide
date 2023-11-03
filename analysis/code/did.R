@@ -429,9 +429,53 @@ stacked_dyn_plot <- generate_stacked_plot(mod_stacked_df, MAX_WEEKS, outcome_var
 
 
 # Graph all models --------------------------------------------------------
-# Put all the results df's togehter
-rbind(mod_twfe_df,mod_etwfe_df, mod_stacked_df,mod_etwfe_pkg_df, mod_cs_df)
+# Put all the results df's together
+mod_etwfe_pkg_df <- data.table(mod_etwfe_pkg_df)
+mod_etwfe_pkg_df # TODO: the effects need to be avg across rel time period
+mod_all_df <- rbind(mod_twfe_df,mod_etwfe_df, mod_stacked_df, mod_cs_df)
+mod_all_df <- mod_all_df[t!=-999]
+fwrite(mod_all_df, paste0(out_dir,'all_mod_df.csv'))
 
+# True effects
+mod_tru_df <- copy(avg_te_rel_time)
+setnames(mod_tru_df, c('time_since_treat','mean_treat_effect'), c('t','estimate'))
+mod_tru_df[, t := t-1]
+colnames(mod_all_df)
+unq_t <- sort(unique(mod_all_df$t))
+unq_t
+sort(unique(mod_tru_df$t))
+t_add <- setdiff(unq_t,sort(unique(mod_tru_df$t)))
+
+mod_tru_df <- rbind(mod_tru_df, data.table(t= t_add, estimate = 0))
+# "conf.low"  "conf.high" "method"
+mod_tru_df[, conf.low := 0L]
+mod_tru_df[, conf.high := 0L]
+mod_tru_df[, method := 'True effect']
+mod_all_df <- rbind(mod_all_df,mod_tru_df)
+
+title = ' '
+plot <- mod_all_df %>%
+  ggplot(aes(x = t, y = estimate, color = method, shape = method)) + 
+  geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
+  geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), size = 0.75) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", size = .25, alpha = 0.75) + 
+  geom_vline(xintercept = -0.5, linetype = "dashed", size = .25) +
+  scale_color_brewer(name="Estimation Method", palette="Set1") + # Choose a color palette
+  scale_shape_manual(name="Estimation Method", values = 1:6) + # Change the shape for different groups
+  theme(legend.position= 'bottom',  
+        panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(color = "#f0f0f0", linetype = 1), # Adds major grid lines
+        panel.grid.minor = element_blank(), # Adds minor grid lines
+        axis.line = element_line(color = "gray"),
+        text = element_text(size = 16)) +
+  labs(title = title, y="Estimate", x = "Period since treatment") + 
+  guides(color = guide_legend(nrow = 3), shape = guide_legend(nrow = 3)) +
+  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS) 
+
+
+print(plot)  
+
+ggsave(paste0(out_dir,'all_mod.png'))
 
 # Beep -------------
 beep()
