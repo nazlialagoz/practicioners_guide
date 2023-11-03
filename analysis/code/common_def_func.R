@@ -16,6 +16,7 @@ library(kableExtra) # Make nice tables
 library(bacondecomp) # Goodman-Bacon Decomposition
 library(did) # Difference-in-differences
 library(etwfe)
+library(beepr)
 
 
 dir.create('../output/',  showWarnings = FALSE)
