@@ -17,6 +17,8 @@ library(bacondecomp) # Goodman-Bacon Decomposition
 library(did) # Difference-in-differences
 library(etwfe)
 library(beepr)
+library(dplyr)
+library(stringr)
 
 
 dir.create('../output/',  showWarnings = FALSE)

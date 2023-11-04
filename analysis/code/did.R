@@ -6,6 +6,7 @@ source('../../simulation/code/sim_data.R') # Import simulation function and some
 source('common_def_func.R') # Import libraries and common functions
 
 dt <- sim_data()
+
 unique(dt$cohort_period)
 unique(dt$period)
 # dt <- dt[] # exclude period where everyone is treated so that we have an untreated group
@@ -32,10 +33,23 @@ sort(unique(dt$time_since_treat))
 unique(dt[time_since_treat == -999]$cohort_period)
 
 unq_rel_t <- sort(unique(dt$time_since_treat))
-most_neg_t <- min(setdiff(unq_rel_t,-999))
-ref_periods <- c(most_neg_t,-999) # TODO: change this into the most min one?
-# TODO: make other methods also take -4 as the ref OR simply use +/-2 weeks around treatment
 MAX_WEEKS = max(setdiff(unq_rel_t,-999))
+
+# Based on the existence of untreated group decide control group and ref periods
+there_is_untreated = (dt[cohort_period == 999, .N] > 0)
+
+if(there_is_untreated){
+  control_group = c("nevertreated","notyettreated") # CS
+  
+  most_neg_t <- min(setdiff(unq_rel_t,-999))
+  ref_periods <- c(most_neg_t,-999) # TODO: change this into the most min one?
+  
+}else{
+  control_group = c("notyettreated")
+  ref_periods <- unq_rel_t[1:2] # the most two negative
+  }
+
+
 
 # Visualize the outcome variable -----------------------------------------------
 avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
@@ -192,13 +206,13 @@ out <- att_gt(yname = "hrs_listened",
               data = dt_cs,
               est_method = "reg",
               allow_unbalanced_panel = T,
-              control_group = c("nevertreated", "notyettreated")
+              control_group = control_group
 )
 out
 rel_period_effects <- aggte(out, type = "dynamic")
 group_effects <- aggte(out, type = "group")
 simple_effects <- aggte(out, type = "simple")
-ggdid(out)
+ggdid(rel_period_effects)
 
 # Convert result into df
 mod_cs_df <- rel_period_effects %>% 
@@ -222,14 +236,14 @@ dt[, time_since_treat_min1 := as.integer(time_since_treat==-1)]
 
 mod_etwfe_pkg =
   etwfe(
-    fml  = hrs_listened ~ time_since_treat_min1, # outcome ~ controls
+    fml  = hrs_listened ~ 1, # outcome ~ controls
     tvar = period,        # time variable
     gvar = cohort_period, # group variable
     data = dt,       # dataset
     vcov = ~unit  # vcov adjustment (here: clustered)
   )
 summary(mod_etwfe_pkg)
-mod_etwfe_pkg$collin.var # can't do pre periods cause its trying to * w cohort and period dummies. 
+# can't do pre periods cause its trying to * w cohort and period dummies. 
 
 # Put the results into a DF
 mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>% 
@@ -358,6 +372,11 @@ run_stacked_did_simple <- function(outcome_variable) {
 
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
 
+# Stacked requires an untreated group
+# Error: in feols(model_formula_simple, data = stacked_data, ...:
+# The only variable 'treat' is collinear with the fixed effects. In such
+# circumstances, the estimation is void.
+
 # Model function
 run_stacked_did <- function(outcome_variable, MAX_WEEKS, ref_periods) {
   # outcome_variable = 'hrs_listened'
@@ -441,9 +460,112 @@ generate_stacked_plot <- function(mod_stacked_df, MAX_WEEKS, outcome_variable, o
 stacked_dyn_plot <- generate_stacked_plot(mod_stacked_df, MAX_WEEKS, outcome_variable, out_dir)
 
 
+
+# Manual ETWFE ------------------------------------------------------------
+# DiD ETWFE ---------------------------------------------------------------
+# Do a weighed regression using Inversed Propensity Scores as weight
+dt[,time_since_treat_min1:= NULL]
+# Make dummy variables for each cohort period and post period to use in the regression
+make_dummies <- function(dt){
+  dum <- as.data.table(dummy_cols(dt, select_columns = c("treat","cohort_period","time_since_treat")))
+  head(dum)
+  
+  periods <- sort(unique(dt$period))
+  t <- periods[1:length(periods)]
+  myfun <- function(t,period) as.numeric(period == t)
+  tmp <- dt[, lapply(t, myfun, period)]
+  setnames(tmp, c(paste0("t_",t)))
+  dummied <- cbind(dum, tmp)
+  return(dummied)
+}
+
+dt_dummied <- make_dummies(dt)
+colnames(dt_dummied)
+
+# Make regression formula
+sort(unique(dt_dummied$time_since_treat))
+sort(unique(dt_dummied$cohort_period))
+
+cols <- colnames(dt_dummied)
+cols
+time_since_treat_cols <- cols[grepl('time_since_treat_',cols)]
+cohort_period_cols <- cols[grepl('cohort_period_',cols)]
+
+# Filter out the '999' values from both sets of columns
+filtered_time_since_treat_cols <- time_since_treat_cols[!grepl('999', time_since_treat_cols)]
+filtered_cohort_period_cols <- cohort_period_cols[!grepl('999', cohort_period_cols)]
+
+# Convert the suffixes to numeric values, excluding '-999'
+time_since_treat_values <- as.numeric(sub("time_since_treat_", "", filtered_time_since_treat_cols))
+time_since_treat_values <- time_since_treat_values[time_since_treat_values != -999]
+
+# Sort the values and exclude the minimum three
+sorted_values <- sort(time_since_treat_values)
+excluded_values <- head(sorted_values, 4)
+
+# Remove the minimum three time_since_treat values
+filtered_time_since_treat_cols <- filtered_time_since_treat_cols[!as.numeric(sub("time_since_treat_", "", filtered_time_since_treat_cols)) %in% excluded_values]
+
+# Add backticks around time_since_treat variables
+filtered_time_since_treat_cols <- paste0("`", filtered_time_since_treat_cols, "`")
+
+# Create all combinations of the filtered cohort_period and time_since_treat columns
+covariate_combinations <- expand.grid(filtered_cohort_period_cols, filtered_time_since_treat_cols)
+covariate_combinations <- apply(covariate_combinations, 1, function(x) paste(x[1], x[2], sep = ":"))
+
+# Create the regression formula
+dv <- "hrs_listened"  # Replace with your actual dependent variable
+formula <- as.formula(paste(dv, "~", paste(covariate_combinations, collapse = " + ")))
+
+# Output the formula
+formula
+lm(formula, dt_dummied)
+
+# OLS regression for log duration
+reg_etwfe_ols <- function(formula, dt){
+  etwfe <- feols(formula,
+                 data = dt, panel.id = "unit",
+                 cluster = "unit", fixef = c("cohort_period", "period"))
+  return(etwfe)
+}
+
+etwfe_manual <- reg_etwfe_ols(formula,dt_dummied)
+etwfe_manual$collin.var
+# Need to be careful about the collinear variables when including - periods
+summary(etwfe_manual)
+etwfe_manual_tidy <- broom::tidy(etwfe_manual, conf.int = TRUE)%>%
+  select(-std.error, -statistic,-p.value)
+etwfe_manual_tidy
+
+
+etwfe_manual_tidy <- etwfe_manual_tidy %>%
+  mutate(
+    cohort_period_num = as.numeric(str_extract(term, "(?<=cohort_period_)\\d+")),
+    time_since_treat_num = as.numeric(str_extract(term, "(?<=time_since_treat_)[-\\d]+"))
+  )
+
+etwfe_manual_tidy <- data.table(etwfe_manual_tidy)
+etwfe_manual_tidy[, term:= NULL]
+etwfe_manual_tidy[, cohort_period_num:= NULL] # TODO: seems like the last period is taken as reference or sth
+setnames(etwfe_manual_tidy, 'time_since_treat_num', 't')
+mod_etwfe_manual_df <- etwfe_manual_tidy %>%
+  group_by(t) %>%
+  summarise(
+    estimate = mean(estimate),
+    conf.low = mean(conf.low),
+    conf.high = mean(conf.high),
+    .groups = 'drop' # This drops the grouping structure afterwards
+  )
+mod_etwfe_manual_df <- data.table(mod_etwfe_manual_df)
+mod_etwfe_manual_df$t
+mod_etwfe_manual_df[, method:= 'ETWFE_manual']
+mod_cs_df$t
+
+  
+
 # Graph all models --------------------------------------------------------
 # Put all the results df's together
-mod_all_df <- rbind(mod_twfe_df,mod_etwfe_pkg_avg_df, mod_stacked_df, mod_cs_df)
+mod_all_df <- rbind(mod_twfe_df,mod_etwfe_pkg_avg_df,mod_etwfe_manual_df, mod_stacked_df, mod_cs_df)
 mod_all_df <- mod_all_df[t!=-999]
 fwrite(mod_all_df, paste0(out_dir,'all_mod_df.csv'))
 
