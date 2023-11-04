@@ -229,7 +229,7 @@ mod_etwfe_pkg =
     vcov = ~unit  # vcov adjustment (here: clustered)
   )
 summary(mod_etwfe_pkg)
-mod_etwfe_pkg$collin.var
+mod_etwfe_pkg$collin.var # can't do pre periods cause its trying to * w cohort and period dummies. 
 
 # Put the results into a DF
 mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>% 
@@ -242,20 +242,33 @@ mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>%
   bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   mutate(method = 'ETWFE_pkg')
-print(data.table(mod_etwfe_pkg_df))
+
+mod_etwfe_pkg_avg_df <- mod_etwfe_pkg_df %>%
+  group_by(t, method) %>%
+  summarise(
+    estimate = mean(estimate),
+    conf.low = mean(conf.low),
+    conf.high = mean(conf.high),
+    .groups = 'drop' # This drops the grouping structure afterwards
+  )
+
+# View the results
+mod_etwfe_pkg_avg_df <- data.table(mod_etwfe_pkg_avg_df)
+print((mod_etwfe_pkg_df))
 # Write to CSV
-write.csv(mod_etwfe_pkg_df, paste0(out_dir,'mod_result', '_ETWFE_pkg.csv'))
+write.csv(mod_etwfe_pkg_avg_df, paste0(out_dir,'mod_result', '_ETWFE_pkg.csv'))
 
 # TODO: do we need to try hand written one to see if we can have -1 period?
-# Manual ETWFE
+# Manual ETWFE - incomplete
 dv = 'hrs_listened'
 run_etwfe <- function(dv){
   formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = ref_periods)")) 
-  twfe_ols <- feols(formula, data = dt, panel.id = "unit",
-                    cluster = "unit", fixef = c("unit", "period"))
-  print(summary(twfe_ols))
-  saveRDS(twfe_ols, paste0(out_dir, dv, '_twfe.rds'))
+
+  # formula <- as.formula(paste0(dv, " ~ i.time_since_treat::i.cohort_period"))
   
+  twfe_ols <- feols(formula, data = dt, panel.id = "unit",
+                    cluster = "unit", fixef = c("cohort_period", "period"))
+  print(summary(twfe_ols))
   # Save results as df
   export_reg_as_df(twfe_ols, dv, out_dir,method = 'ETWFE', ref_periods = ref_periods)
 }
@@ -430,9 +443,7 @@ stacked_dyn_plot <- generate_stacked_plot(mod_stacked_df, MAX_WEEKS, outcome_var
 
 # Graph all models --------------------------------------------------------
 # Put all the results df's together
-mod_etwfe_pkg_df <- data.table(mod_etwfe_pkg_df)
-mod_etwfe_pkg_df # TODO: the effects need to be avg across rel time period
-mod_all_df <- rbind(mod_twfe_df,mod_etwfe_df, mod_stacked_df, mod_cs_df)
+mod_all_df <- rbind(mod_twfe_df,mod_etwfe_pkg_avg_df, mod_stacked_df, mod_cs_df)
 mod_all_df <- mod_all_df[t!=-999]
 fwrite(mod_all_df, paste0(out_dir,'all_mod_df.csv'))
 
