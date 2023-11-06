@@ -15,14 +15,14 @@ unique(dt$period)
 # EDA and Analysis --------------------------------------------------------
 # Check out the data
 
-select_cols <- c('unit', 'period', 'cohort_period','treat','hrs_listened')
+select_cols <- c('unit', 'period', 'cohort_period','treat','dep_var')
 
 kable(head(dt[, ..select_cols]), 'simple')
 
 kable(summary(dt[, ..select_cols]), 'simple')
 
 dt[, .N, by = cohort_period] # group sizes
-dt[, .(mean_hrs_listened = mean(hrs_listened)), by = cohort_period]
+dt[, .(mean_dep_var = mean(dep_var)), by = cohort_period]
 
 # Create relative time dummy
 dt[, time_since_treat := period-cohort_period]
@@ -58,19 +58,19 @@ if(there_is_untreated){
 
 
 # Visualize the outcome variable -----------------------------------------------
-avg_dv_period <- dt[, .(mean_hrs_listened = mean(hrs_listened)), by = c('cohort_period','period')] 
+avg_dv_period <- dt[, .(mean_dep_var = mean(dep_var)), by = c('cohort_period','period')] 
 
 # Convert 'cohort_period' to a factor to have discrete color scale in the plot
 avg_dv_period[, cohort_period := as.factor(cohort_period)]
 
 # Plot
-ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_period, color = cohort_period)) +
+ggplot(avg_dv_period, aes(x = period, y = mean_dep_var, group = cohort_period, color = cohort_period)) +
   geom_line() +
   geom_vline(data = avg_dv_period[cohort_period == period], 
              aes(xintercept = period), linetype = "dashed") +
   scale_color_discrete(name = "Cohort-period") +
   labs(x = "Period", # title = "Trends in Mean Hours Listened by Cohort Period",
-       y = "Mean Hours Listened") +
+       y = "Outcome variable") +
   scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
   my_theme() 
 ggsave(paste0(out_dir, 'outcome_by_cohort_period.png'))
@@ -85,7 +85,7 @@ line_types <- line_types[1:num_cohorts]
 shapes <- shapes[1:num_cohorts]
 
 # Plot
-gg <- ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_period)) +
+gg <- ggplot(avg_dv_period, aes(x = period, y = mean_dep_var, group = cohort_period)) +
   geom_line(aes(linetype = cohort_period)) +
   geom_point(aes(shape = cohort_period)) +
   geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period, linetype = cohort_period), color = "black") +
@@ -93,7 +93,7 @@ gg <- ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohor
   scale_shape_manual(values = shapes) +
   labs( # title = "Trends in Mean Hours Listened by Cohort Period",
        x = "Period",
-       y = "Mean Hours Listened",
+       y = "Outcome variable",
        linetype = "Cohort-period",
        shape = "Cohort-period") +
   scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
@@ -113,14 +113,14 @@ avg_treat_period <- dt[treat == 1, .(mean_treat_effect = mean(tau_cum)), by = c(
 plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat_effect, x=period)) + 
   scale_fill_brewer(palette = "Set1") + # Color palette
   geom_bar(position=position_dodge2(preserve = "single"), stat="identity") +  
-  labs(x = "Period", y = "Hours", 
+  labs(x = "Period", y = "Treatment effect", 
        # title = 'True treatment effects (hrs)',
        # subtitle = 'Treatment effect heterogeneity across cohorts'
        ) + 
   theme(legend.position = 'bottom',
         axis.title = element_text(size = 14),
         axis.text = element_text(size = 12)) +
-  guides(fill=guide_legend(title="Treatment cohort-period")) + 
+  guides(fill=guide_legend(title="Cohort-period")) + 
   scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
   # scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect))) + 
   my_theme()
@@ -168,7 +168,7 @@ ggsave(paste0(out_dir, 'true_te_by_rel_period_bw.png'))
 
 
 # A) Canonical DiD -------------------------------------------------------------
-formula <- as.formula('hrs_listened ~ treat')
+formula <- as.formula('dep_var ~ treat')
 canonical_did <- feols(formula,
                        data = dt, panel.id = "unit",
                        fixef = c("unit", "period"), cluster = "unit")
@@ -177,7 +177,24 @@ simple_twfe_avg = canonical_did$coefficients
 
 # Bacon Decomposition
 bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
+summary(bacon_decomp)
 bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
+
+# Assuming bacon_decomp is loaded in your R session
+library(xtable)
+bacon_decomp <- data.table(bacon_decomp)
+bacon_decomp[, treated:=as.integer(treated)]
+bacon_decomp[, untreated:=as.integer(untreated)]
+bacon_decomp[, estimate:=round(estimate,2)]
+bacon_decomp[, weight:=round(weight,2)]
+setnames(bacon_decomp, colnames(bacon_decomp), tools::toTitleCase(colnames(bacon_decomp)))
+# Convert the data frame to a LaTeX table
+latex_table <- xtable(bacon_decomp)
+
+# Print the LaTeX code for the table
+print(latex_table, include.rownames = FALSE, 
+      hline.after = c(-1, 0), # Horizontal lines at the top of the table
+      booktabs = TRUE) # Use booktabs style for a more professional look
 
 # B) DiD with post-period-cohort specific TEs ----------------------------------
 
@@ -200,7 +217,7 @@ dt_did <- dt_did %>%
   dummy_cols(select_columns = c("cohort_period", "period"))
 
 # Regression
-formula <- as.formula(paste0('hrs_listened ~ treat'))
+formula <- as.formula(paste0('dep_var ~ treat'))
 model <- feols(formula,
                data = dt_did, panel.id = "unit",
                fixef = c("unit", "period"), cluster = "unit")
@@ -213,7 +230,7 @@ model$coefficients
 dt_cs <- copy(dt)
 dt_cs[treatment_group == 0, cohort_period := 0] # according to the pkg instructions
 
-out <- att_gt(yname = "hrs_listened",
+out <- att_gt(yname = "dep_var",
               gname = "cohort_period",
               idname = "unit",
               tname = "period",
@@ -251,7 +268,7 @@ dt[, time_since_treat_min1 := as.integer(time_since_treat==-1)]
 
 mod_etwfe_pkg =
   etwfe(
-    fml  = hrs_listened ~ 1, # outcome ~ controls
+    fml  = dep_var ~ 1, # outcome ~ controls
     tvar = period,        # time variable
     gvar = cohort_period, # group variable
     data = dt,       # dataset
@@ -310,7 +327,7 @@ run_twfe <- function(dv){
   export_reg_as_df(twfe_ols, dv, out_dir,method = 'TWFE', ref_periods = ref_periods)
 }
 
-mod_twfe_df <- data.table(run_twfe(dv = 'hrs_listened'))
+mod_twfe_df <- data.table(run_twfe(dv = 'dep_var'))
 
 
 # Create stacked data -----------------------------------------------------
@@ -352,7 +369,7 @@ summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
 # Stacked DiD regressions
 
-outcome_variable = 'hrs_listened'
+outcome_variable = 'dep_var'
 ref_periods
 
 run_stacked_did_simple <- function(outcome_variable) {
@@ -377,7 +394,7 @@ stacked_simple_avg_te <- mod_stacked_simple$coefficients
 
 # Model function
 run_stacked_did <- function(outcome_variable, MAX_WEEKS, ref_periods) {
-  # outcome_variable = 'hrs_listened'
+  # outcome_variable = 'dep_var'
   # ref_periods = c(-2, -999)
   
   # Model
@@ -484,7 +501,7 @@ covariate_combinations <- expand.grid(filtered_cohort_period_cols, filtered_time
 covariate_combinations <- apply(covariate_combinations, 1, function(x) paste(x[1], x[2], sep = ":"))
 
 # Create the regression formula
-dv <- "hrs_listened"  # Replace with your actual dependent variable
+dv <- "dep_var"  # Replace with your actual dependent variable
 formula <- as.formula(paste(dv, "~", paste(covariate_combinations, collapse = " + ")))
 
 # Output the formula
@@ -600,17 +617,16 @@ plot <- unique(mod_all_df[method!='ETWFE_manual'], by = c('method','t')) %>%
   my_theme()
 
 print(plot)  
-
+ggsave(paste0(out_dir,'all_mod.png'))
 plot +
   # Add horizontal lines
-  geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
+  # geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
   geom_hline(yintercept = simple_twfe_avg, linetype = "dashed", color = "red") +
 
   # Add text labels for the horizontal lines
-  annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
-  annotate("text", x = Inf, y = simple_twfe_avg, label = "Simple avg te", hjust = 1.1, vjust = 1.5, color = "red")
+  # annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
+  annotate("text", x = Inf, y = simple_twfe_avg, label = "Simple TWFE", hjust = 1.1, vjust = 1.5, color = "red")
 
-ggsave(paste0(out_dir,'all_mod.png'))
 
 
 

@@ -1,3 +1,4 @@
+# Sim w/ covs
 # Simulate the data 
 
 
@@ -14,10 +15,6 @@ library(ggthemes)
 
 select <- dplyr::select
 set.seed(123)
-
-# Utilities: set theme and choose a palette for the graphs
-theme_set(theme_clean() + theme(plot.background = element_blank()))
-cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
 
 # Initiate the data -----------------------------------------------------------
@@ -80,7 +77,7 @@ sim_data <- function(...){
                                   cohort_periods = c(2,3,4,99,100,101), # c(2,3,4,5,6,7,8)
                                   constant = constant))
   
-  # setnames(data, 'dep_var', 'hrs_listened')
+  setnames(data, 'dep_var', 'hrs_listened')
   setkeyv(data, c('cohort_period', 'unit', 'period'))
   
   # Introduce heterogeneity in treatment effects 
@@ -90,7 +87,7 @@ sim_data <- function(...){
   setkeyv(data, c('unit', 'period')) # order
   data[cohort_period==2, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
-  data[cohort_period==2, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
+  data[cohort_period==2, hrs_listened := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
@@ -99,10 +96,39 @@ sim_data <- function(...){
   setkeyv(data, c('unit', 'period')) # order
   data[cohort_period==3, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
-  data[cohort_period==3, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
+  data[cohort_period==3, hrs_listened := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
   
   setkeyv(data, c('unit', 'period'))
   
   return(data)
 }
 
+
+sim_data <- function(num_unit = 1000, num_period = 10, tau = 1.00, cohort_periods = c(2, 3, 4, 99, 100, 101), 
+                     constant = 80, interaction_term = 0, include_covariate = FALSE) {
+  
+  # ... existing code for generating 'unit' and 'period' data ...
+  
+  # Add a covariate column if include_covariate is TRUE
+  if (include_covariate) {
+    unit <- unit %>% 
+      mutate(covariate = rnorm(num_unit, mean = 0, sd = 1)) # Or use a different distribution/mean/sd as needed
+  } else {
+    unit <- unit %>% 
+      mutate(covariate = 0) # Include the covariate column but set all values to 0
+  }
+  
+  # ... existing code for merging 'unit' and 'period' data ...
+  
+  # Modify treatment effect based on the covariate if include_covariate is TRUE
+  data <- data %>%
+    mutate(tau = ifelse(treat == 1, mu + (include_covariate * covariate * interaction_term), 0)) %>%
+    group_by(unit) %>%
+    mutate(tau_cum = cumsum(tau)) %>%
+    ungroup() %>%
+    mutate(hrs_listened = calc_dep_var(constant, unit_fe, period_fe, tau_cum, error))
+  
+  # ... rest of the existing code ...
+  
+  return(data)
+}
