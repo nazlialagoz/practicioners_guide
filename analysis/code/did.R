@@ -35,6 +35,11 @@ unique(dt[time_since_treat == -999]$cohort_period)
 unq_rel_t <- sort(unique(dt$time_since_treat))
 MAX_WEEKS = max(setdiff(unq_rel_t,-999))
 
+# Find number of units per time since treat
+n_by_time_since_treat <- dt[time_since_treat>0, .N, by = time_since_treat]
+tot_N <- sum(n_by_time_since_treat$N)
+n_by_time_since_treat[, prop := N/tot_N]
+
 # Based on the existence of untreated group decide control group and ref periods
 there_is_untreated = (dt[cohort_period == 999, .N] > 0)
 
@@ -100,8 +105,6 @@ ggsave(paste(out_dir, 'plot_outcome_by_cohort_period_bw.png'))
 
 # Plot true treatment effects --------------------------------------------------
 avg_treat_period <- dt[treat == 1, .(mean_treat_effect = mean(tau_cum)), by = c('cohort_period','period')]
-# Convert 'cohort_period' to a factor for discrete fill patterns
-avg_treat_period[, cohort_period := as.factor(cohort_period)]
 
 # Color plot
 plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat_effect, x=period)) + 
@@ -116,7 +119,6 @@ plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat
   scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
   scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect)))
 plot_te
-
 
 ggsave(paste(out_dir, 'plot_true_te_by_cohort_period.png'))
 
@@ -133,9 +135,15 @@ ggsave(paste(out_dir, 'plot_true_te_by_cohort_period_bw.png'))
 avg_treat_period[, time_since_treat := period-as.numeric(cohort_period)]
 avg_te_rel_time <- avg_treat_period[, .(mean_treat_effect = mean(mean_treat_effect)), by = time_since_treat]
 
+true_te_avg = mean(dt[treat == 1]$tau_cum)
+
+# Find avg per cohort
+true_te_cohort <- avg_treat_period[, .(mean_te_cohort = mean(mean_treat_effect)), by = cohort_period]
+mean(true_te_cohort$mean_te_cohort)
+
 # overall avg
-avg = round(mean(avg_te_rel_time$mean_treat_effect),2)
-print(paste0('Overall avg TE: ', avg))
+true_te_avg_agg_rel = round(mean(avg_te_rel_time$mean_treat_effect),2)
+print(paste0('Overall avg TE: ', true_te_avg))
 
 # Create the grayscale bar graph with adjusted bar width
 ggplot(avg_te_rel_time, aes(x = time_since_treat, y = mean_treat_effect)) +
@@ -145,7 +153,7 @@ ggplot(avg_te_rel_time, aes(x = time_since_treat, y = mean_treat_effect)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
   labs(x = "Time Since Treatment", y = "Mean Treatment Effect", 
        title = "Mean Treatment Effect Over Time",
-       subtitle = paste('Overall avg. = ', avg)) +
+       subtitle = paste('Overall avg. = ', true_te_avg)) +
   theme_minimal() +
   theme(legend.position = "none")
 
@@ -158,11 +166,11 @@ canonical_did <- feols(formula,
                        data = dt, panel.id = "unit",
                        fixef = c("unit", "period"), cluster = "unit")
 summary(canonical_did) 
-
+simple_twfe_avg = canonical_did$coefficients
 
 # Bacon Decomposition
 bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
-sum(bacon_decomp$weight * bacon_decomp$estimate)
+bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
 
 # B) DiD with post-period-cohort specific TEs ----------------------------------
 
@@ -190,7 +198,7 @@ model <- feols(formula,
                data = dt_did, panel.id = "unit",
                fixef = c("unit", "period"), cluster = "unit")
 summary(model) 
-
+model$coefficients
 
 
 # C) did package by Santanna & Callaway ----------------------------------------
@@ -209,13 +217,13 @@ out <- att_gt(yname = "hrs_listened",
               control_group = control_group
 )
 out
-rel_period_effects <- aggte(out, type = "dynamic")
-group_effects <- aggte(out, type = "group")
-simple_effects <- aggte(out, type = "simple")
-ggdid(rel_period_effects)
+cs_rel_period_effects <- aggte(out, type = "dynamic")
+cs_group_effects <- aggte(out, type = "group")
+cs_overall_avg  <- aggte(out, type = "simple")
+ggdid(cs_rel_period_effects)
 
 # Convert result into df
-mod_cs_df <- rel_period_effects %>% 
+mod_cs_df <- cs_rel_period_effects %>% 
   tidy() %>% 
   rename(t = event.time) %>% 
   filter(t > -MAX_WEEKS & t <= MAX_WEEKS) %>% 
@@ -255,7 +263,7 @@ mod_etwfe_pkg_df <- broom::tidy(mod_etwfe_pkg, conf.int = TRUE) %>%
   select(t, estimate, conf.low, conf.high) %>% 
   bind_rows(tibble(t = ref_periods[1], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
   bind_rows(tibble(t = ref_periods[2], estimate = 0, conf.low = 0, conf.high = 0)) %>% 
-  mutate(method = 'ETWFE_pkg')
+  mutate(method = 'ETWFE')
 
 mod_etwfe_pkg_avg_df <- mod_etwfe_pkg_df %>%
   group_by(t, method) %>%
@@ -271,24 +279,6 @@ mod_etwfe_pkg_avg_df <- data.table(mod_etwfe_pkg_avg_df)
 print((mod_etwfe_pkg_df))
 # Write to CSV
 write.csv(mod_etwfe_pkg_avg_df, paste0(out_dir,'mod_result', '_ETWFE_pkg.csv'))
-
-# TODO: do we need to try hand written one to see if we can have -1 period?
-# Manual ETWFE - incomplete
-dv = 'hrs_listened'
-run_etwfe <- function(dv){
-  formula <- as.formula(paste0(dv,"~ i(time_since_treat, ref = ref_periods)")) 
-
-  # formula <- as.formula(paste0(dv, " ~ i.time_since_treat::i.cohort_period"))
-  
-  twfe_ols <- feols(formula, data = dt, panel.id = "unit",
-                    cluster = "unit", fixef = c("cohort_period", "period"))
-  print(summary(twfe_ols))
-  # Save results as df
-  export_reg_as_df(twfe_ols, dv, out_dir,method = 'ETWFE', ref_periods = ref_periods)
-}
-
-mod_etwfe_df <- data.table(run_etwfe(dv = dv))
-mod_etwfe_df
 
 # E) Stacked DiD ---------------------------------------------------------------
 head(dt)
@@ -371,6 +361,7 @@ run_stacked_did_simple <- function(outcome_variable) {
 }
 
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
+stacked_simple_avg_te <- mod_stacked_simple$coefficients
 
 # Stacked requires an untreated group
 # Error: in feols(model_formula_simple, data = stacked_data, ...:
@@ -413,52 +404,24 @@ save_model_results <- function(model, MAX_WEEKS, ref_periods, out_dir) {
 
 mod_stacked_df <- save_model_results(model=mod_stacked, MAX_WEEKS, ref_periods, out_dir)
 
+# Regular avg. TE
+mod_stacked_df_N <- mod_stacked_df[t>=0]
+mod_stacked_df_N <- merge(mod_stacked_df_N, n_by_time_since_treat, by.x = 't', by.y = 'time_since_treat')
+mod_stacked_df_N[, estimate_prop:= prop*estimate]
+stacked_avg_te <- sum(mod_stacked_df_N$estimate_prop)
+mean(mod_stacked_df[t>=0]$estimate)
 
-# Generate plot from coefficients
-generate_stacked_plot <- function(mod_stacked_df, MAX_WEEKS, outcome_variable, out_dir) {
-  # Plotting logic
-  
-  # Regular avg. TE
-  stacked_treat <- mod_stacked_df[t>=0]
-  stacked_treat[, SE := (conf.high - estimate)/1.96] # given .95 conf level
-  stacked_treat[, var := SE^2]
-  overall_ATT = sum(stacked_treat$estimate)/length(stacked_treat$estimate)
-  overall_ATT_SE = (1/length(stacked_treat$estimate))*sqrt(sum(stacked_treat$var))
-  overall_ATT_t_value = overall_ATT/overall_ATT_SE
-  overall_ATT_p_value <- round(2 * (1 - pnorm(abs(overall_ATT_t_value))),3)  
-  
-  subtitle = paste0('Overall ATT = ', round(overall_ATT,3), 
-                    generate_significance_stars(overall_ATT_p_value),
-                    ' (p-value = ', overall_ATT_p_value, ')')
-  
-  # plot 
-  coefs <- bind_rows(mod_stacked_df) 
-  
-  # coef_min = MAX_WEEKS*-1 # the most min is the ref period thus anchored at 0
-  # coef_max = MAX_WEEKS
-  
-  plot <- coefs[t>=-MAX_WEEKS & t<=MAX_WEEKS] %>% 
-    ggplot(aes(x = t, y = estimate, color = method)) + 
-    geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
-    geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), linewidth = 0.75) +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = .25, alpha = 0.75) + 
-    geom_vline(xintercept = -0.5, linetype = "dashed", linewidth = .25) +
-    scale_color_manual(name="Estimation Method", values= met.brewer("Cross", 8, "discrete")) +
-    theme(legend.position= 'bottom') +
-    labs(title = 'Event Time Estimates', y="ATT", x = "Relative Time", 
-         subtitle = subtitle, 
-         caption = '* indicates statistically significant at .05 significance level.') + 
-    scale_x_continuous(breaks= sort(coefs$t))
-  
-  print(plot)
-  
-  # Save plot
-  ggsave(paste0(out_dir,'_stacked_dynamic_max_period',MAX_WEEKS,'.png'))
-  
-  return(plot)
-}
-stacked_dyn_plot <- generate_stacked_plot(mod_stacked_df, MAX_WEEKS, outcome_variable, out_dir)
+mod_stacked_df_N[, SE_prop := prop*((conf.high - estimate)/1.96)] # given .95 conf level
+mod_stacked_df_N[, var_prop := SE_prop^2]
+stacked_avg_te_SE = (1/nrow(mod_stacked_df_N))*sqrt(sum(mod_stacked_df_N$var_prop))
+overall_ATT_t_value = stacked_avg_te/stacked_avg_te_SE
+overall_ATT_p_value <- round(2 * (1 - pnorm(abs(overall_ATT_t_value))),3)  
 
+subtitle = paste0('Overall ATT for stacked DiD = ', round(stacked_avg_te,3), 
+                  generate_significance_stars(overall_ATT_p_value),
+                  ' (p-value = ', overall_ATT_p_value, ')')
+
+print(subtitle)
 
 
 # Manual ETWFE ------------------------------------------------------------
@@ -501,7 +464,7 @@ time_since_treat_values <- time_since_treat_values[time_since_treat_values != -9
 
 # Sort the values and exclude the minimum three
 sorted_values <- sort(time_since_treat_values)
-excluded_values <- head(sorted_values, 4)
+excluded_values <- head(sorted_values, 5)
 
 # Remove the minimum three time_since_treat values
 filtered_time_since_treat_cols <- filtered_time_since_treat_cols[!as.numeric(sub("time_since_treat_", "", filtered_time_since_treat_cols)) %in% excluded_values]
@@ -572,7 +535,7 @@ fwrite(mod_all_df, paste0(out_dir,'all_mod_df.csv'))
 # True effects
 mod_tru_df <- copy(avg_te_rel_time)
 setnames(mod_tru_df, c('time_since_treat','mean_treat_effect'), c('t','estimate'))
-mod_tru_df[, t := t-1]
+# mod_tru_df[, t := t-1]
 colnames(mod_all_df)
 unq_t <- sort(unique(mod_all_df$t))
 unq_t
@@ -605,10 +568,79 @@ plot <- mod_all_df %>%
   guides(color = guide_legend(nrow = 3), shape = guide_legend(nrow = 3)) +
   scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS) 
 
+plot +
+  # Add horizontal lines
+  geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = simple_twfe_avg, linetype = "dashed", color = "red") +
+
+  # Add text labels for the horizontal lines
+  annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
+  annotate("text", x = Inf, y = simple_twfe_avg, label = "Simple avg te", hjust = 1.1, vjust = 1.5, color = "red")
+
+cs_overall_avg$overall.att
 
 print(plot)  
 
 ggsave(paste0(out_dir,'all_mod.png'))
 
+
+
+# Add avg: cs_overall_avg, true_te_avg, simple_twfe_avg, stacked_simple_avg_te,
+# stacked_avg_te, stacked_avg_te
+
+# Simple TWFE
+simple_twfe_avg <- canonical_did$coefficients[1]
+simple_twfe_se <- canonical_did$se[1]
+
+# Dynamic TWFE
+mod_twfe_df_N <- mod_twfe_df[t>=0]
+mod_twfe_df_N <- merge(mod_twfe_df_N, n_by_time_since_treat, by.x = 't', by.y = 'time_since_treat')
+mod_twfe_df_N[, estimate_prop:= prop*estimate]
+twfe_dyn_avg_te <- sum(mod_twfe_df_N$estimate_prop)
+
+mod_twfe_df_N[, SE_prop := prop*((conf.high - estimate)/1.96)] # given .95 conf level
+mod_twfe_df_N[, var_prop := SE_prop^2]
+twfe_dyn_avg_te_SE = (1/nrow(mod_twfe_df_N))*sqrt(sum(mod_twfe_df_N$var_prop))
+twfe_dyn_avg_te_t_value = twfe_dyn_avg_te/twfe_dyn_avg_te_SE
+twfe_dyn_avg_te_p_value <- round(2 * (1 - pnorm(abs(twfe_dyn_avg_te_t_value))),3)  
+
+# CS
+cs_overall_ATT <- cs_overall_avg$overall.att
+cs_overall_se <- cs_overall_avg$overall.se
+
+# Stacked
+stacked_avg_te
+stacked_avg_te_SE
+
+# ETWFE
+etwfe_avg_te <- emfx(mod_etwfe_pkg,type = c("simple"))
+etwfe_overall_ATT <- etwfe_avg_te$estimate
+etwfe_overall_se <- etwfe_avg_te$std.error
+
+library(forcats)
+
+# Create a data frame with your values
+values <- data.frame(
+  method = factor(c("CS", "True Effect", "Simple TWFE", "Dynamic TWFE", 'ETWFE', "Stacked"),
+                  levels = c("True Effect", "Simple TWFE", "Dynamic TWFE", "CS", "Stacked", "ETWFE")),
+  value = c(cs_overall_ATT, true_te_avg, simple_twfe_avg, twfe_dyn_avg_te, etwfe_overall_ATT, stacked_avg_te),  # Replace with actual values
+  se = c(cs_overall_se, 0, simple_twfe_se, twfe_dyn_avg_te_SE, etwfe_overall_se, stacked_avg_te_SE) # Replace with actual SE values
+)
+
+# Reorder the factor levels for 'method'
+values$method <- fct_relevel(values$method, "True Effect", "Simple TWFE", "Dynamic TWFE", "CS", "Stacked", "ETWFE")
+
+# Create the bar plot with error bars
+plot <- ggplot(values, aes(x = method, y = value, fill = method)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = value - se, ymax = value + se), width = .2) +
+  scale_fill_manual(values = c("True Effect" = "black", "Simple TWFE" = "grey", "CS" = "grey", 
+                               "Stacked" = "grey", "ETWFE" = "grey", "Dynamic TWFE" = "grey")) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Value", title = "Comparison of Averages") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))  # Adjust to ensure bars and error bars aren't cut off
+
+plot
 # Beep -------------
 beep()

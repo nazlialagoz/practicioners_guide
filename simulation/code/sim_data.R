@@ -77,7 +77,7 @@ sim_data <- function(...){
   data <- as.data.table(init_data(num_unit = 1000, 
                                   num_period = 10, 
                                   tau = 1.00, 
-                                  cohort_periods = c(2,3,4,5,99,100,101), # c(2,3,4,5,6,7,8)
+                                  cohort_periods = c(2,3,4,99,100,101), # c(2,3,4,5,6,7,8)
                                   constant = constant))
   
   setnames(data, 'dep_var', 'hrs_listened')
@@ -85,12 +85,22 @@ sim_data <- function(...){
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
-  data[cohort_period==2, tau := 4*tau]
+  data[cohort_period==2, tau := 3*tau]
   # calculate tau_cum
   setkeyv(data, c('unit', 'period')) # order
   data[cohort_period==2, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
   data[cohort_period==2, hrs_listened := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
+  
+  # Introduce heterogeneity in treatment effects 
+  # calculate the new tau
+  data[cohort_period==3, tau := 2*tau]
+  # calculate tau_cum
+  setkeyv(data, c('unit', 'period')) # order
+  data[cohort_period==3, tau_cum := cumsum(tau), by = unit]
+  # calculate the dependent variable
+  data[cohort_period==3, hrs_listened := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
+  
   setkeyv(data, c('unit', 'period'))
   
   return(data)
