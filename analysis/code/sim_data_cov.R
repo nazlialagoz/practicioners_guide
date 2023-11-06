@@ -66,7 +66,7 @@ init_data <- function(num_unit, num_period, tau, cohort_periods, constant, inclu
     group_by(unit) %>%
     mutate(
       tau_cum = cumsum(tau),
-      cov_effect = interaction_term * covariate # interaction_term is the coef
+      cov_effect = treat*interaction_term * covariate # interaction_term is the coef
     ) %>%
     ungroup() %>%
     mutate(

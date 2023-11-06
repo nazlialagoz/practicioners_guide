@@ -9,7 +9,7 @@ head(dt)
 
 
 # Prep --------------------------------------------------------------------
-
+dt[, covariate.f := as.factor(covariate)]
 
 unique(dt$cohort_period)
 unique(dt$period)
@@ -95,9 +95,42 @@ unique(dt$cov_effect)
 
 # Visualize the treatment effect w/ cov -----------------------------------
 # Per cohort, rel time, and covariate. 
+# How to find avg effect of it. 
+avg_dv_period <- dt[, .(mean_dep_var = mean(dep_var)), by = c('cohort_period','time_since_treat','covariate.f')] 
+
+# Assuming avg_dv_period is your data frame
+ggplot(avg_dv_period[cohort_period!=999], aes(x = time_since_treat, y = mean_dep_var, 
+                          group = interaction(cohort_period, covariate.f),
+                          color = factor(covariate.f), linetype = factor(covariate.f))) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Time Since Treatment", y = "Mean Dependent Variable",
+       color = "Covariate Value", linetype = "Covariate Value") +
+  theme_minimal() +
+  scale_color_manual(values = c("0" = "blue", "1" = "red")) +
+  scale_linetype_manual(values = c("0" = "solid", "1" = "dashed")) +
+  facet_wrap(~cohort_period) # If you want separate plots for each coh
+ggsave(paste0(out_dir, 'dv_cov.pnd'))
+
+# TWFE -------------------------------------------------------------------
+# Simple
+formula <- as.formula('dep_var ~ treat + covariate')
+twfe <- feols(formula,
+                       data = dt, panel.id = "unit",
+                       fixef = c("unit", "period"), cluster = "unit")
+summary(twfe) 
+simple_twfe_avg = twfe$coefficients
+
+# Bacon Decomposition
+bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
+summary(bacon_decomp)
+bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
+
+
+# Dynamic
+
 
 # ETWFE -------------------------------------------------------------------
-dt[, covariate.f := as.factor(covariate)]
 mod_etwfe_pkg =
   etwfe(
     fml  = dep_var ~ 0, # outcome ~ controls
