@@ -638,9 +638,10 @@ plot <- ggplot(values, aes(x = method, y = value, fill = method)) +
                                "Stacked" = "grey", "ETWFE" = "grey", "Dynamic TWFE" = "grey")) +
   theme_minimal() +
   theme(legend.position = "none") +
-  labs(x = "", y = "Value", title = "Comparison of Averages") +
+  labs(x = "", y = "Value", title = "Comparison of Overall ATT Estimates") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.05)))  # Adjust to ensure bars and error bars aren't cut off
 
 plot
+ggsave(paste0(out_dir, 'ovarall_att_comparison.png'))
 # Beep -------------
 beep()
