@@ -112,9 +112,17 @@ ggplot(avg_dv_period[cohort_period!=999], aes(x = time_since_treat, y = mean_dep
   facet_wrap(~cohort_period) # If you want separate plots for each coh
 ggsave(paste0(out_dir, 'dv_cov.pnd'))
 
+# True treatment effect
+dt[, total_effect := treat*(tau_cum+cov_effect)]
+true_avg = mean(dt[treat==1]$total_effect) # 10.24
+true_avg_cov1 = (dt[treat==1 & covariate.f==1, 
+                        .(mean(total_effect))]) # 12.03
+true_avg_cov0 = mean(dt[treat==1 & covariate.f==0]$total_effect) # 8.291
+
 # TWFE -------------------------------------------------------------------
 # Simple
-formula <- as.formula('dep_var ~ treat + covariate')
+dt[, treat_covariate := treat*covariate]
+formula <- as.formula('dep_var ~ treat + treat_covariate')
 twfe <- feols(formula,
                        data = dt, panel.id = "unit",
                        fixef = c("unit", "period"), cluster = "unit")
@@ -142,7 +150,7 @@ mod_etwfe_pkg =
   )
 summary(mod_etwfe_pkg)
 
-emfx(
+etwfe <- emfx(
   mod_etwfe_pkg,
   type = c("simple"),
   by_xvar = T,
@@ -151,5 +159,60 @@ emfx(
 
 
 # Stacked -----------------------------------------------------------------
+# Create stacked data -----------------------------------------------------
+### for stacking
+groups <- unique(dt[treatment_group == 1]$cohort_period)
 
+sort(groups)
+sort(unique(dt$period))
+
+MAX_WEEKS # indicates the time window around treatment
+
+### create stacked data
+getdata <- function(i) {
+  
+  #keep what we need
+  dt %>% 
+    # keep focal treatment cohort (i) and the correct controls, i.e., cohorts treated after
+    # keep treated units and all units not treated within specified time period
+    filter(cohort_period == i | cohort_period > (i + MAX_WEEKS)) %>%
+    # keep just relevant time periods
+    filter(period >= (i - MAX_WEEKS) & period <= (i + MAX_WEEKS)) %>%
+    # create an indicator for the dataset
+    mutate(df = i) %>% 
+    # mutate(time_to_treatment = period - cohort_period) %>% 
+    # make dummies
+    mutate(time_since_treat = if_else(cohort_period == i, time_since_treat, -999)) # TODO: check this. why don't we do -999 only for the untreated
+}
+stacked_data <- map_df(groups, getdata) %>% 
+  mutate(bracket_df = paste(unit,df))
+
+stacked_data<- as.data.table(stacked_data)
+head(stacked_data[df==2,c('unit','period','cohort_period', 'time_since_treat','df','bracket_df')],100)
+summary(stacked_data$time_since_treat)
+summary(stacked_data$time_since_treat)
+
+sort(unique(stacked_data$cohort_period))
+summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
+
+
+# Stacked DiD regressions
+
+outcome_variable = 'dep_var'
+ref_periods
+
+run_stacked_did_simple <- function(outcome_variable) {
+  # Define the model formula
+  model_formula_simple <- as.formula(paste(outcome_variable, "~ treat + treat_covariate | unit^df + period^df"))
+  
+  # Fit the model using the 'feols' function from the 'fixest' package
+  model_simple <- feols(model_formula_simple, data = stacked_data, cluster = "bracket_df")
+  
+  # Print the summary of the model
+  print(summary(model_simple)) 
+  return(model_simple)
+}
+
+mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
+stacked_simple_avg_te <- mod_stacked_simple$coefficients
 
