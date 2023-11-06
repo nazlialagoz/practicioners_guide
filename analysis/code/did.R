@@ -65,13 +65,14 @@ avg_dv_period[, cohort_period := as.factor(cohort_period)]
 # Plot
 ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_period, color = cohort_period)) +
   geom_line() +
-  geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period), linetype = "dashed") +
+  geom_vline(data = avg_dv_period[cohort_period == period], 
+             aes(xintercept = period), linetype = "dashed") +
   scale_color_discrete(name = "Cohort Period") +
-  labs(title = "Trends in Mean Hours Listened by Cohort Period",
-       x = "Period",
+  labs(x = "Period", # title = "Trends in Mean Hours Listened by Cohort Period",
        y = "Mean Hours Listened") +
-  theme_minimal()
-ggsave(paste(out_dir, 'plot_outcome_by_cohort_period.png'))
+  scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
+  my_theme() 
+ggsave(paste0(out_dir, 'outcome_by_cohort_period.png'))
 
 
 # Black and white friendly
@@ -89,18 +90,19 @@ gg <- ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohor
   geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period, linetype = cohort_period), color = "black") +
   scale_linetype_manual(values = line_types) +
   scale_shape_manual(values = shapes) +
-  labs(title = "Trends in Mean Hours Listened by Cohort Period",
+  labs( # title = "Trends in Mean Hours Listened by Cohort Period",
        x = "Period",
        y = "Mean Hours Listened",
        linetype = "Cohort Period",
        shape = "Cohort Period") +
-  theme_minimal()
+  scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
+  my_theme() 
 
 # Set color blindness-friendly palette for digital version and print
 gg <- gg + scale_color_brewer(palette = "Dark2", name = "Cohort Period")
 
 print(gg)
-ggsave(paste(out_dir, 'plot_outcome_by_cohort_period_bw.png'))
+ggsave(paste0(out_dir, 'outcome_by_cohort_period_bw.png'))
 
 
 # Plot true treatment effects --------------------------------------------------
@@ -110,25 +112,28 @@ avg_treat_period <- dt[treat == 1, .(mean_treat_effect = mean(tau_cum)), by = c(
 plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat_effect, x=period)) + 
   scale_fill_brewer(palette = "Set1") + # Color palette
   geom_bar(position=position_dodge2(preserve = "single"), stat="identity") +  
-  labs(x = "Period", y = "Hours", title = 'True treatment effects (hrs)',
-       subtitle = 'Treatment effect heterogeneity across cohorts') + 
+  labs(x = "Period", y = "Hours", 
+       # title = 'True treatment effects (hrs)',
+       # subtitle = 'Treatment effect heterogeneity across cohorts'
+       ) + 
   theme(legend.position = 'bottom',
         axis.title = element_text(size = 14),
         axis.text = element_text(size = 12)) +
   guides(fill=guide_legend(title="Treatment cohort period")) + 
   scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
-  scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect)))
+  # scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect))) + 
+  my_theme()
 plot_te
 
-ggsave(paste(out_dir, 'plot_true_te_by_cohort_period.png'))
+ggsave(paste0(out_dir, 'true_te_by_cohort_period.png'))
 
 # Create a grayscale plot
 grayscale_plot <- plot_te +
-  scale_fill_grey(start = 0.8, end = 0.2) + # Grayscale fill
-  labs(title = "True Treatment Effects by Cohort Period and Period")
+  scale_fill_grey(start = 0.8, end = 0.2) # + # Grayscale fill
+  # labs(title = "True Treatment Effects by Cohort Period and Period")
 grayscale_plot
 
-ggsave(paste(out_dir, 'plot_true_te_by_cohort_period_bw.png'))
+ggsave(paste0(out_dir, 'true_te_by_cohort_period_bw.png'))
 
 # Plot avg TE by time since treatment ------------------------------------------
 # Calculate avg te by period
@@ -151,13 +156,14 @@ ggplot(avg_te_rel_time, aes(x = time_since_treat, y = mean_treat_effect)) +
   geom_text(aes(label = round(mean_treat_effect, 2)), vjust = -0.3) +
   scale_x_continuous(breaks = avg_te_rel_time$time_since_treat) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-  labs(x = "Time Since Treatment", y = "Mean Treatment Effect", 
-       title = "Mean Treatment Effect Over Time",
-       subtitle = paste('Overall avg. = ', true_te_avg)) +
-  theme_minimal() +
+  labs(x = "Time Since Treatment", y = "Avg. Treatment Effect" #, 
+       # title = "Mean Treatment Effect Over Time",
+       # subtitle = paste0('Overall avg. = ', true_te_avg)
+        ) +
+  my_theme() +
   theme(legend.position = "none")
 
-ggsave(paste(out_dir, 'plot_true_te_by_rel_period_bw.png'))
+ggsave(paste0(out_dir, 'true_te_by_rel_period_bw.png'))
 
 
 # A) Canonical DiD -------------------------------------------------------------
@@ -549,7 +555,6 @@ mod_tru_df[, conf.high := 0L]
 mod_tru_df[, method := 'True effect']
 mod_all_df <- rbind(mod_all_df,mod_tru_df)
 
-title = ' '
 plot <- mod_all_df %>%
   ggplot(aes(x = t, y = estimate, color = method, shape = method)) + 
   geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
@@ -564,9 +569,10 @@ plot <- mod_all_df %>%
         panel.grid.minor = element_blank(), # Adds minor grid lines
         axis.line = element_line(color = "gray"),
         text = element_text(size = 16)) +
-  labs(title = title, y="Estimate", x = "Period since treatment") + 
+  labs(y="Estimate", x = "Period since treatment") + 
   guides(color = guide_legend(nrow = 3), shape = guide_legend(nrow = 3)) +
-  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS) 
+  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS) +
+  my_theme()
 
 plot +
   # Add horizontal lines
@@ -576,8 +582,6 @@ plot +
   # Add text labels for the horizontal lines
   annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
   annotate("text", x = Inf, y = simple_twfe_avg, label = "Simple avg te", hjust = 1.1, vjust = 1.5, color = "red")
-
-cs_overall_avg$overall.att
 
 print(plot)  
 
@@ -636,12 +640,14 @@ plot <- ggplot(values, aes(x = method, y = value, fill = method)) +
   geom_errorbar(aes(ymin = value - se, ymax = value + se), width = .2) +
   scale_fill_manual(values = c("True Effect" = "black", "Simple TWFE" = "grey", "CS" = "grey", 
                                "Stacked" = "grey", "ETWFE" = "grey", "Dynamic TWFE" = "grey")) +
-  theme_minimal() +
+  my_theme_rotate() +
   theme(legend.position = "none") +
-  labs(x = "", y = "Value", title = "Comparison of Overall ATT Estimates") +
+  labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
   scale_y_continuous(expand = expansion(mult = c(0, 0.05)))  # Adjust to ensure bars and error bars aren't cut off
 
 plot
 ggsave(paste0(out_dir, 'ovarall_att_comparison.png'))
+
+
 # Beep -------------
 beep()
