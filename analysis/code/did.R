@@ -1,5 +1,6 @@
 
 # Simulation study for the DiD article: 
+# TODO: change the dv from hrs listened to dv or outcome var, sth generic
 
 rm(list = ls())
 source('../../simulation/code/sim_data.R') # Import simulation function and some utilities
@@ -67,7 +68,7 @@ ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohort_peri
   geom_line() +
   geom_vline(data = avg_dv_period[cohort_period == period], 
              aes(xintercept = period), linetype = "dashed") +
-  scale_color_discrete(name = "Cohort Period") +
+  scale_color_discrete(name = "Cohort-period") +
   labs(x = "Period", # title = "Trends in Mean Hours Listened by Cohort Period",
        y = "Mean Hours Listened") +
   scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
@@ -93,13 +94,13 @@ gg <- ggplot(avg_dv_period, aes(x = period, y = mean_hrs_listened, group = cohor
   labs( # title = "Trends in Mean Hours Listened by Cohort Period",
        x = "Period",
        y = "Mean Hours Listened",
-       linetype = "Cohort Period",
-       shape = "Cohort Period") +
+       linetype = "Cohort-period",
+       shape = "Cohort-period") +
   scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
   my_theme() 
 
 # Set color blindness-friendly palette for digital version and print
-gg <- gg + scale_color_brewer(palette = "Dark2", name = "Cohort Period")
+gg <- gg + scale_color_brewer(palette = "Dark2", name = "Cohort-period")
 
 print(gg)
 ggsave(paste0(out_dir, 'outcome_by_cohort_period_bw.png'))
@@ -119,7 +120,7 @@ plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat
   theme(legend.position = 'bottom',
         axis.title = element_text(size = 14),
         axis.text = element_text(size = 12)) +
-  guides(fill=guide_legend(title="Treatment cohort period")) + 
+  guides(fill=guide_legend(title="Treatment cohort-period")) + 
   scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
   # scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect))) + 
   my_theme()
@@ -555,7 +556,31 @@ mod_tru_df[, conf.high := 0L]
 mod_tru_df[, method := 'True effect']
 mod_all_df <- rbind(mod_all_df,mod_tru_df)
 
-plot <- mod_all_df %>%
+# Set estimates to 0 for negative periods for ETWFE method
+# Set this to TRUE if you want to add negative periods for ETWFE, or FALSE if not
+add_negative_periods_for_etwfe <- TRUE
+
+if (add_negative_periods_for_etwfe) {
+  # Find the unique negative periods from other methods
+  negative_periods <- unique(mod_all_df[t < 0 & method != "ETWFE", t])
+  
+  # Create a data.table with the missing negative periods for ETWFE
+  missing_etwfe_data <- data.table(
+    t = negative_periods,
+    estimate = 0,
+    conf.low = 0,
+    conf.high = 0,
+    method = "ETWFE"
+  )
+  
+  # Combine the missing ETWFE data with the original data
+  mod_all_df <- rbindlist(list(mod_all_df, missing_etwfe_data), fill = TRUE)
+  
+  # Order the data for plotting
+  setorder(mod_all_df, method, t)
+}
+
+plot <- unique(mod_all_df[method!='ETWFE_manual'], by = c('method','t')) %>%
   ggplot(aes(x = t, y = estimate, color = method, shape = method)) + 
   geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 1) +
   geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), size = 0.75) +
@@ -574,6 +599,8 @@ plot <- mod_all_df %>%
   scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS) +
   my_theme()
 
+print(plot)  
+
 plot +
   # Add horizontal lines
   geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
@@ -582,8 +609,6 @@ plot +
   # Add text labels for the horizontal lines
   annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
   annotate("text", x = Inf, y = simple_twfe_avg, label = "Simple avg te", hjust = 1.1, vjust = 1.5, color = "red")
-
-print(plot)  
 
 ggsave(paste0(out_dir,'all_mod.png'))
 
