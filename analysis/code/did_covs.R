@@ -179,9 +179,6 @@ etwfe <- emfx(
 # TODO: put the results into a latex table
 etwfe$contrast
 
-# Load the xtable library
-library(xtable)
-
 # Assuming etwfe is your data frame with the model results
 # Convert your data frame to a LaTeX table
 latex_table <- xtable(etwfe)
@@ -262,5 +259,45 @@ msummary(mod_stacked_simple,
 
 
 # Combine Stacked & ETWFE -------------------------------------------------
+# Model outcomes for Stacked DiD
+stacked_did_data <- data.frame(
+  term = c("treat", "treat_covariate"),
+  estimate = stacked_did_results$Estimate, # c(6.94020, 3.36778),
+  std.error = stacked_did_results$Std.Error, # c(0.495011, 0.638373),
+  stars = c("***", "***") # Manually adding stars for significance levels
+)
 
+# Model outcomes for ETWFE
+etwfe_data <- data.frame(
+  term = c("treat", "treat x covariate"),
+  estimate = c(etwfe$estimate[1], etwfe$estimate[2] - etwfe$estimate[1]), # Calculating the interaction term
+  std.error = c(etwfe$std.error[1], sqrt(etwfe$std.error[1]^2 + etwfe$std.error[2]^2)), # Assuming independence for the interaction term
+  stars = c("***", "***") # Manually adding stars for significance levels
+)
+
+# Create a new data frame to combine the results
+combined_results <- data.frame(
+  Term = stacked_did_data$term,
+  StackedDiD = paste0(stacked_did_data$estimate, stacked_did_data$stars, "\n", "(", stacked_did_data$std.error, ")"),
+  ETWFE = paste0(etwfe_data$estimate, etwfe_data$stars, "\n", "(", etwfe_data$std.error, ")")
+)
+
+# Set row names to NULL to avoid printing them
+row.names(combined_results) <- NULL
+
+# Convert to LaTeX table
+latex_table <- xtable(combined_results, align = "llcc", caption = "Results from Stacked DiD with a Moderator", label = "tab:stacked_cov")
+print(latex_table, include.rownames = FALSE, hline.after = c(-1, 0, 2), booktabs = TRUE,
+      sanitize.text.function = function(x) {
+        # Replace line breaks with LaTeX double backslash for new line
+        gsub("\n", " \\\\\n", x)
+      },
+      caption.placement = "top")
+
+# Optionally, write to file
+print(latex_table, include.rownames = FALSE, hline.after = c(-1, 0, 2), booktabs = TRUE,
+      sanitize.text.function = function(x) {
+        gsub("\n", " \\\\\n", x)
+      },
+      file = "model_results_table.tex", caption.placement = "top")
 

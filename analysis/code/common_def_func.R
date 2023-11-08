@@ -19,6 +19,7 @@ library(etwfe)
 library(beepr)
 library(dplyr)
 library(stringr)
+library(xtable)
 
 
 dir.create('../output/',  showWarnings = FALSE)
