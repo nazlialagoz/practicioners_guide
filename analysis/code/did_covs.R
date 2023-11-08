@@ -97,20 +97,23 @@ unique(dt$cov_effect)
 # Per cohort, rel time, and covariate. 
 # How to find avg effect of it. 
 avg_dv_period <- dt[, .(mean_dep_var = mean(dep_var)), by = c('cohort_period','time_since_treat','covariate.f')] 
-
+avg_dv_period <- avg_dv_period[cohort_period!=999]
+avg_dv_period[, time_since_treat := as.integer(time_since_treat)]
+avg_dv_period[, `Cohort-period` :=  cohort_period]
 # Assuming avg_dv_period is your data frame
-ggplot(avg_dv_period[cohort_period!=999], aes(x = time_since_treat, y = mean_dep_var, 
-                          group = interaction(cohort_period, covariate.f),
+ggplot(avg_dv_period, aes(x = (time_since_treat), y = mean_dep_var, 
+                          group = interaction(`Cohort-period`, covariate.f),
                           color = factor(covariate.f), linetype = factor(covariate.f))) +
   geom_line() +
   geom_point() +
+  scale_x_continuous(breaks = -4:7)+
   labs(x = "Time Since Treatment", y = "Mean Dependent Variable",
        color = "Covariate Value", linetype = "Covariate Value") +
-  theme_minimal() +
-  scale_color_manual(values = c("0" = "blue", "1" = "red")) +
-  scale_linetype_manual(values = c("0" = "solid", "1" = "dashed")) +
-  facet_wrap(~cohort_period) # If you want separate plots for each coh
-ggsave(paste0(out_dir, 'dv_cov.pnd'))
+  my_theme() +
+  scale_color_manual(values = c("0" = "black", "1" = "darkgray")) +
+  scale_linetype_manual(values = c("0" = "dashed", "1" = "solid"))  +
+  facet_wrap(~`Cohort-period`, labeller = "label_both") # If you want separate plots for each coh
+ggsave(paste0(out_dir, 'dv_cov.png'))
 
 # True treatment effect
 dt[, total_effect := treat*(tau_cum+cov_effect)]
@@ -129,11 +132,16 @@ twfe <- feols(formula,
 summary(twfe) 
 simple_twfe_avg = twfe$coefficients
 
+msummary(twfe,
+         output = paste0(out_dir,"canonical_did_cov.tex"),
+         stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+         fmt = 2)
+
+formula <- as.formula('dep_var ~ treat + covariate')
 # Bacon Decomposition
 bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
 summary(bacon_decomp)
-bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
-
+bacon_decomp$two_by_twos
 #> # Bacon Decomposition
 #> bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
 # type  weight  avg_est
@@ -155,12 +163,34 @@ mod_etwfe_pkg =
   )
 summary(mod_etwfe_pkg)
 
+emfx(mod_etwfe_pkg, type = "event") # dynamic ATE a la an event study
+
+msummary(mod_etwfe_pkg,
+         output = paste0(out_dir,"etwfe_cov.tex"),
+         stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+         fmt = 2)
+
+
 etwfe <- emfx(
   mod_etwfe_pkg,
   type = c("simple"),
   by_xvar = T,
   collapse = "auto")
+# TODO: put the results into a latex table
+etwfe$contrast
 
+# Load the xtable library
+library(xtable)
+
+# Assuming etwfe is your data frame with the model results
+# Convert your data frame to a LaTeX table
+latex_table <- xtable(etwfe)
+
+# Print the LaTeX table to the console
+print(latex_table, include.rownames=FALSE)
+
+# Optionally, you can use the print.xtable function to write the table to a file
+print(latex_table, include.rownames=FALSE, file=paste0(out_dir,"etwfe_cov.tex"))
 
 
 # Stacked -----------------------------------------------------------------
@@ -221,4 +251,16 @@ run_stacked_did_simple <- function(outcome_variable) {
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
 stacked_simple_avg_te <- mod_stacked_simple$coefficients
 
+
+msummary(mod_stacked_simple,
+         output = paste0(out_dir,"stacked_did_cov.tex"),
+         stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+         fmt = 2)
+
+
 # ETWFE seems to be better but it cannot do continous
+
+
+# Combine Stacked & ETWFE -------------------------------------------------
+
+

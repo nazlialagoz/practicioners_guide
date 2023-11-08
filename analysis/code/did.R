@@ -692,14 +692,14 @@ values$method <- fct_relevel(values$method, "True Effect", "Simple TWFE", "Dynam
 plot <- ggplot(values, aes(x = method, y = value, fill = method)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_errorbar(aes(ymin = value - se, ymax = value + se), width = .2) +
-  geom_text(aes(label = round(value, 2)), vjust = -2.5, color = "black", size = 3.5) +  # Adjust 'vjust' and 'size' as needed
+  geom_text(aes(label = round(value, 2)), vjust = -3, color = "black", size = 5) +  # Adjust 'vjust' and 'size' as needed
   scale_fill_manual(values = c("True Effect" = "black", "Simple TWFE" = "grey", "CS" = "grey", 
                                "Stacked" = "grey", "ETWFE" = "grey", "Dynamic TWFE" = "grey")) +
   my_theme_rotate() +
   theme(legend.position = "none") +
   labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
   scale_y_continuous(expand = expansion(mult = c(0, 0.05)), # Adjust to ensure bars and error bars aren't cut off
-                     limits = c(0,10))  
+                     limits = c(0,11))  
 
 plot
 ggsave(paste0(out_dir, 'overall_att_comparison.png'))
