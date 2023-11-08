@@ -174,6 +174,19 @@ canonical_did <- feols(formula,
                        fixef = c("unit", "period"), cluster = "unit")
 summary(canonical_did) 
 simple_twfe_avg = canonical_did$coefficients
+modelsummary(canonical_did)
+
+# Assuming 'canonical_did' is your model object from 'feols'
+modelsummary(canonical_did,
+             title = "Model Results",
+             output = "latex",
+             stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01))
+
+msummary(canonical_did,
+         output = paste0(out_dir,"canonical_did.tex"),
+         stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+         fmt = 2)
+
 
 # Bacon Decomposition
 bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
@@ -675,19 +688,21 @@ values <- data.frame(
 # Reorder the factor levels for 'method'
 values$method <- fct_relevel(values$method, "True Effect", "Simple TWFE", "Dynamic TWFE", "CS", "Stacked", "ETWFE")
 
-# Create the bar plot with error bars
+# Create the bar plot with error bars and add the text on top
 plot <- ggplot(values, aes(x = method, y = value, fill = method)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_errorbar(aes(ymin = value - se, ymax = value + se), width = .2) +
+  geom_text(aes(label = round(value, 2)), vjust = -2.5, color = "black", size = 3.5) +  # Adjust 'vjust' and 'size' as needed
   scale_fill_manual(values = c("True Effect" = "black", "Simple TWFE" = "grey", "CS" = "grey", 
                                "Stacked" = "grey", "ETWFE" = "grey", "Dynamic TWFE" = "grey")) +
   my_theme_rotate() +
   theme(legend.position = "none") +
   labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
-  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))  # Adjust to ensure bars and error bars aren't cut off
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), # Adjust to ensure bars and error bars aren't cut off
+                     limits = c(0,10))  
 
 plot
-ggsave(paste0(out_dir, 'ovarall_att_comparison.png'))
+ggsave(paste0(out_dir, 'overall_att_comparison.png'))
 
 
 # Beep -------------

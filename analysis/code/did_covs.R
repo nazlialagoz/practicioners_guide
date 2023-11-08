@@ -134,6 +134,11 @@ bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F
 summary(bacon_decomp)
 bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
 
+#> # Bacon Decomposition
+#> bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
+# type  weight  avg_est
+# 1         Both Treated 0.16419 -4.51856
+# 2 Treated vs Untreated 0.83581 13.65014
 
 # Dynamic
 
@@ -216,3 +221,4 @@ run_stacked_did_simple <- function(outcome_variable) {
 mod_stacked_simple <- run_stacked_did_simple(outcome_variable)
 stacked_simple_avg_te <- mod_stacked_simple$coefficients
 
+# ETWFE seems to be better but it cannot do continous
