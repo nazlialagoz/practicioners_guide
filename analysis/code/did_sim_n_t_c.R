@@ -3,10 +3,13 @@
 # TODO: change the dv from hrs listened to dv or outcome var, sth generic
 
 rm(list = ls())
-source('../../simulation/code/sim_data.R') # Import simulation function and some utilities
+source('sim_n_t_c.R') # Import simulation function and some utilities
 source('common_def_func.R') # Import libraries and common functions
 
-dt <- sim_data()
+dt <- sim_data(num_unit = 1000, 
+               num_period = 10, 
+               tau = 1.00, 
+               cohort_periods = c(2,3,4,99,100,101))
 
 unique(dt$cohort_period)
 unique(dt$period)
@@ -16,13 +19,6 @@ unique(dt$period)
 # Check out the data
 
 select_cols <- c('unit', 'period', 'cohort_period','treat','dep_var')
-
-kable(head(dt[, ..select_cols]), 'simple')
-
-kable(summary(dt[, ..select_cols]), 'simple')
-
-dt[, .N, by = cohort_period] # group sizes
-dt[, .(mean_dep_var = mean(dep_var)), by = cohort_period]
 
 # Create relative time dummy
 dt[, time_since_treat := period-cohort_period]
@@ -53,118 +49,7 @@ if(there_is_untreated){
 }else{
   control_group = c("notyettreated")
   ref_periods <- unq_rel_t[1:2] # the most two negative
-  }
-
-
-
-# Visualize the outcome variable -----------------------------------------------
-avg_dv_period <- dt[, .(mean_dep_var = mean(dep_var)), by = c('cohort_period','period')] 
-
-# Convert 'cohort_period' to a factor to have discrete color scale in the plot
-avg_dv_period[, cohort_period := as.factor(cohort_period)]
-
-# Plot
-ggplot(avg_dv_period, aes(x = period, y = mean_dep_var, group = cohort_period, color = cohort_period)) +
-  geom_line() +
-  geom_vline(data = avg_dv_period[cohort_period == period], 
-             aes(xintercept = period), linetype = "dashed") +
-  scale_color_discrete(name = "Cohort-period") +
-  labs(x = "Period", # title = "Trends in Mean Hours Listened by Cohort Period",
-       y = "Outcome variable") +
-  scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
-  my_theme() 
-ggsave(paste0(out_dir, 'outcome_by_cohort_period.png'))
-
-
-# Black and white friendly
-# Define the linetypes and shapes based on the number of unique cohort_periods
-line_types <- c("solid", "dashed", "dotted", "twodash", "longdash")
-shapes <- c(16, 17, 18, 19, 15)  # Filled shapes
-num_cohorts <- length(unique(avg_dv_period$cohort_period))
-line_types <- line_types[1:num_cohorts]
-shapes <- shapes[1:num_cohorts]
-
-# Plot
-gg <- ggplot(avg_dv_period, aes(x = period, y = mean_dep_var, group = cohort_period)) +
-  geom_line(aes(linetype = cohort_period)) +
-  geom_point(aes(shape = cohort_period)) +
-  geom_vline(data = avg_dv_period[cohort_period == period], aes(xintercept = period, linetype = cohort_period), color = "black") +
-  scale_linetype_manual(values = line_types) +
-  scale_shape_manual(values = shapes) +
-  labs( # title = "Trends in Mean Hours Listened by Cohort Period",
-       x = "Period",
-       y = "Outcome variable",
-       linetype = "Cohort-period",
-       shape = "Cohort-period") +
-  scale_x_continuous(breaks = sort(unique(avg_dv_period$period)))+
-  my_theme() 
-
-# Set color blindness-friendly palette for digital version and print
-gg <- gg + scale_color_brewer(palette = "Dark2", name = "Cohort-period")
-
-print(gg)
-ggsave(paste0(out_dir, 'outcome_by_cohort_period_bw.png'))
-
-
-# Plot true treatment effects --------------------------------------------------
-avg_treat_period <- dt[treat == 1, .(mean_treat_effect = mean(tau_cum)), by = c('cohort_period','period')]
-
-# Color plot
-plot_te <- ggplot(avg_treat_period, aes(fill=factor(cohort_period), y=mean_treat_effect, x=period)) + 
-  scale_fill_brewer(palette = "Set1") + # Color palette
-  geom_bar(position=position_dodge2(preserve = "single"), stat="identity") +  
-  labs(x = "Period", y = "Treatment effect", 
-       # title = 'True treatment effects (hrs)',
-       # subtitle = 'Treatment effect heterogeneity across cohorts'
-       ) + 
-  theme(legend.position = 'bottom',
-        axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12)) +
-  guides(fill=guide_legend(title="Cohort-period")) + 
-  scale_x_continuous(breaks = unique(avg_treat_period$period)) + 
-  # scale_y_continuous(breaks = round(unique(avg_treat_period$mean_treat_effect))) + 
-  my_theme()
-plot_te
-
-ggsave(paste0(out_dir, 'true_te_by_cohort_period.png'))
-
-# Create a grayscale plot
-grayscale_plot <- plot_te +
-  scale_fill_grey(start = 0.8, end = 0.2) # + # Grayscale fill
-  # labs(title = "True Treatment Effects by Cohort Period and Period")
-grayscale_plot
-
-ggsave(paste0(out_dir, 'true_te_by_cohort_period_bw.png'))
-
-# Plot avg TE by time since treatment ------------------------------------------
-# Calculate avg te by period
-avg_treat_period[, time_since_treat := period-as.numeric(cohort_period)]
-avg_te_rel_time <- avg_treat_period[, .(mean_treat_effect = mean(mean_treat_effect)), by = time_since_treat]
-
-true_te_avg = mean(dt[treat == 1]$tau_cum)
-
-# Find avg per cohort
-true_te_cohort <- avg_treat_period[, .(mean_te_cohort = mean(mean_treat_effect)), by = cohort_period]
-mean(true_te_cohort$mean_te_cohort)
-
-# overall avg
-true_te_avg_agg_rel = round(mean(avg_te_rel_time$mean_treat_effect),2)
-print(paste0('Overall avg TE: ', true_te_avg))
-
-# Create the grayscale bar graph with adjusted bar width
-ggplot(avg_te_rel_time, aes(x = time_since_treat, y = mean_treat_effect)) +
-  geom_bar(stat = "identity", fill = "gray", width = 0.5) +  # Adjust bar width here
-  geom_text(aes(label = round(mean_treat_effect, 2)), vjust = -0.3) +
-  scale_x_continuous(breaks = avg_te_rel_time$time_since_treat) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-  labs(x = "Time Since Treatment", y = "Avg. Treatment Effect" #, 
-       # title = "Mean Treatment Effect Over Time",
-       # subtitle = paste0('Overall avg. = ', true_te_avg)
-        ) +
-  my_theme() +
-  theme(legend.position = "none")
-
-ggsave(paste0(out_dir, 'true_te_by_rel_period_bw.png'))
+}
 
 
 # A) Canonical DiD -------------------------------------------------------------
@@ -172,34 +57,11 @@ formula <- as.formula('dep_var ~ treat')
 canonical_did <- feols(formula,
                        data = dt, panel.id = "unit",
                        fixef = c("unit", "period"), cluster = "unit")
-summary(canonical_did) 
-simple_twfe_avg = canonical_did$coefficients
-modelsummary(canonical_did)
-
-# Assuming 'canonical_did' is your model object from 'feols'
-modelsummary(canonical_did,
-             title = "Model Results",
-             output = "latex",
-             stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01))
-
-msummary(canonical_did,
-         output = paste0(out_dir,"canonical_did.tex"),
-         stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-         fmt = 2)
-
 
 # Bacon Decomposition
 bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
 summary(bacon_decomp)
 bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
-
-ggplot(bacon_decomp) +
-  aes(x = weight, y = estimate, shape = factor(type)) +
-  geom_point(size = 2) +
-  geom_hline(yintercept = 0) + 
-  theme_minimal()  +
-  labs(x = "Weight", y = "Estimate", shape = "Type")
-ggsave(paste0(out_dir, 'bacon_decomp.png'))
 
 # Assuming bacon_decomp is loaded in your R session
 library(xtable)
@@ -279,10 +141,10 @@ mod_cs_df <- cs_rel_period_effects %>%
 write.csv(mod_cs_df,paste0(out_dir, 'mod_CS_df.csv'))
 
 # Why the estimates are slightly different? 
-  # est procedure & randomness?
-  # Also did package reports simult. conf band. 
-  # using higher critical values to account for simultanous testing
-  # Thus the diff in the significance in addition to diff in the SEs
+# est procedure & randomness?
+# Also did package reports simult. conf band. 
+# using higher critical values to account for simultanous testing
+# Thus the diff in the significance in addition to diff in the SEs
 
 # D) ETWFE       ---------------------------------------------------------------
 dt[, time_since_treat_min1 := as.integer(time_since_treat==-1)]
@@ -569,7 +431,7 @@ mod_etwfe_manual_df$t
 mod_etwfe_manual_df[, method:= 'ETWFE_manual']
 mod_cs_df$t
 
-  
+
 
 # Graph all models --------------------------------------------------------
 # Put all the results df's together
@@ -627,37 +489,6 @@ ci_upper = simple_twfe_avg + 1.96 * simple_twfe_se
 min_x <- min(mod_all_df$t)
 max_x <- max(mod_all_df$t)
 
-plot <- unique(mod_all_df[method!='ETWFE_manual' & method!='TWFE'], by = c('method','t')) %>%
-  ggplot(aes(x = t, y = estimate, color = method, shape = method)) + 
-  geom_point(aes(x = t, y = estimate), position = position_dodge2(width = 0.8), size = 2) +
-  geom_linerange(aes(x = t, ymin = conf.low, ymax = conf.high), position = position_dodge2(width = 0.8), size = 0.75) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = .25, alpha = 0.75) + 
-  geom_vline(xintercept = -0.5, linetype = "dashed", size = .25) +
-  scale_color_brewer(name="Estimation Method", palette="Set1") + # Choose a color palette
-  scale_shape_manual(name="Estimation Method", values = 1:6) + # Change the shape for different groups
-  theme(legend.position= 'bottom',  
-        panel.background = element_rect(fill = "white"),
-        panel.grid.major = element_line(color = "#f0f0f0", linetype = 1), # Adds major grid lines
-        panel.grid.minor = element_blank(), # Adds minor grid lines
-        axis.line = element_line(color = "gray"),
-        text = element_text(size = 16)) +
-  labs(y="Estimate", x = "Period since treatment") + 
-  guides(color = guide_legend(nrow = 3), shape = guide_legend(nrow = 3)) +
-  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS, limits = c(min_x, max_x)) + # 
-  my_theme()
-
-print(plot)  
-plot +
-  # Add horizontal lines
-  # geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
-  geom_hline(yintercept = simple_twfe_avg, linetype = "dashed", color = "red") +
-  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), fill = "red", alpha = 0.05, color = NA) + 
-  # Add text labels for the horizontal lines
-  # annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
-  annotate("text", x = Inf, y = simple_twfe_avg, label = "TWFE", hjust = 1.1, vjust = 1.5, color = "red")
-ggsave(paste0(out_dir,'all_mod.png'))
-
-
 
 # Add avg: cs_overall_avg, true_te_avg, simple_twfe_avg, stacked_simple_avg_te,
 # stacked_avg_te, stacked_avg_te
@@ -687,36 +518,6 @@ etwfe_avg_te <- emfx(mod_etwfe_pkg,type = c("simple"))
 etwfe_overall_ATT <- etwfe_avg_te$estimate
 etwfe_overall_se <- etwfe_avg_te$std.error
 
-library(forcats)
-
-# Create a data frame with your values
-values <- data.frame(
-  method = factor(c("CS", "True Effect", "TWFE", "Dynamic TWFE", 'ETWFE', "Stacked"),
-                  levels = c("True Effect", "TWFE", "Dynamic TWFE", "CS", "Stacked", "ETWFE")),
-  value = c(cs_overall_ATT, true_te_avg, simple_twfe_avg, twfe_dyn_avg_te, etwfe_overall_ATT, stacked_avg_te),  # Replace with actual values
-  se = c(cs_overall_se, 0, simple_twfe_se, twfe_dyn_avg_te_SE, etwfe_overall_se, stacked_avg_te_SE) # Replace with actual SE values
-)
-
-# Reorder the factor levels for 'method'
-values$method <- fct_relevel(values$method, "True Effect", "TWFE", "Dynamic TWFE", "CS", "Stacked", "ETWFE")
-
-values <- as.data.table(values)
-
-# Create the bar plot with error bars and add the text on top
-plot <- ggplot(values[method!='Dynamic TWFE'], aes(x = method, y = value, fill = method)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  geom_errorbar(aes(ymin = value - se, ymax = value + se), width = .2) +
-  geom_text(aes(label = round(value, 2)), vjust = -3, color = "black", size = 5) +  # Adjust 'vjust' and 'size' as needed
-  scale_fill_manual(values = c("True Effect" = "black", "TWFE" = "grey", "CS" = "grey", 
-                               "Stacked" = "grey", "ETWFE" = "grey")) +
-  my_theme_rotate() +
-  theme(legend.position = "none") +
-  labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
-  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), # Adjust to ensure bars and error bars aren't cut off
-                     limits = c(0,11))  
-
-plot
-ggsave(paste0(out_dir, 'overall_att_comparison.png'))
 
 
 # Beep -------------

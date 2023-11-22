@@ -301,3 +301,4 @@ print(latex_table, include.rownames = FALSE, hline.after = c(-1, 0, 2), booktabs
       },
       file = "model_results_table.tex", caption.placement = "top")
 
+# TODO: also add the TWFE models to the table
