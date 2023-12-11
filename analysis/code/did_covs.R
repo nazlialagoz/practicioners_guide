@@ -139,9 +139,10 @@ msummary(twfe,
 
 formula <- as.formula('dep_var ~ treat + covariate')
 # Bacon Decomposition
-bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
-summary(bacon_decomp)
-bacon_decomp$two_by_twos
+# Comment out if you want to use bacon 
+# bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
+# summary(bacon_decomp)
+# bacon_decomp$two_by_twos
 #> # Bacon Decomposition
 #> bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
 # type  weight  avg_est
@@ -225,7 +226,7 @@ summary(stacked_data$time_since_treat)
 summary(stacked_data$time_since_treat)
 
 sort(unique(stacked_data$cohort_period))
-summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
+# summary(stacked_data[cohort_period==999]$time_since_treat) # for the untreated
 
 
 # Stacked DiD regressions
@@ -262,8 +263,8 @@ msummary(mod_stacked_simple,
 # Model outcomes for Stacked DiD
 stacked_did_data <- data.frame(
   term = c("treat", "treat_covariate"),
-  estimate = stacked_did_results$Estimate, # c(6.94020, 3.36778),
-  std.error = stacked_did_results$Std.Error, # c(0.495011, 0.638373),
+  estimate = c(mod_stacked_simple$coefficients), # c(6.94020, 3.36778),
+  std.error = c(mod_stacked_simple$se), # c(0.495011, 0.638373),
   stars = c("***", "***") # Manually adding stars for significance levels
 )
 
