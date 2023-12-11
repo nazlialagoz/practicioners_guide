@@ -1,7 +1,7 @@
 # Covariates --------------------------------------------------------------
 # TWFE & ETWFE & Stacked
 rm(list = ls())
-source('sim_data_cov.R') # Import simulation function and some utilities
+source('../../simulation/code/sim_data_cov.R') # Import simulation function and some utilities
 source('common_def_func.R') # Import libraries and common functions
 
 dt <- sim_data()
