@@ -193,6 +193,18 @@ bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F
 summary(bacon_decomp)
 bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
 
+# Illustrate one of the estimates. 
+# treated : 3, control: 2, est = -2.76, weight 0.03 Later vs Earlier Treated
+# group 3 is treated in time 3. so we look at periods 2 vs 3
+treat_bef = mean(dt[cohort_period==3 & period==2]$dep_var)
+treat_aft = mean(dt[cohort_period==3 & period>=3]$dep_var)
+control_bef = mean(dt[cohort_period==2 & period==2]$dep_var)
+control_aft = mean(dt[cohort_period==2 & period>=3]$dep_var)
+treat_diff = treat_aft- treat_bef
+control_diff = control_aft- control_bef
+treat_diff-control_diff
+
+
 ggplot(bacon_decomp) +
   aes(x = weight, y = estimate, shape = factor(type)) +
   geom_point(size = 2) +
