@@ -655,10 +655,25 @@ plot <- unique(mod_all_df[method!='ETWFE_manual' & method!='TWFE'], by = c('meth
         text = element_text(size = 16)) +
   labs(y="Estimate", x = "Period since treatment") + 
   guides(color = guide_legend(nrow = 3), shape = guide_legend(nrow = 3)) +
-  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS, limits = c(min_x, max_x)) + # 
+  scale_x_continuous(breaks = -MAX_WEEKS:MAX_WEEKS, limits = c(min_x-.4, (max_x+.5))) + # 
   my_theme()
 
 print(plot)  
+
+ribbon_subset <- unique(mod_all_df[(t >= 0 & t <= 7) & method == 'TWFE', ], by = 't')
+
+
+plot +
+  # Replace geom_hline with geom_segment
+  geom_segment(data = ribbon_subset, aes(x = -.5, y = simple_twfe_avg, xend = 7.3, yend = simple_twfe_avg), 
+               linetype = "dashed", color = "red", show.legend = FALSE) +
+  geom_ribbon(data = ribbon_subset,aes(ymin = ci_lower, ymax = ci_upper), 
+              fill = "red", alpha = 0.05, color = NA, show.legend = FALSE) +
+  # Modify annotate to position the label correctly
+  annotate("text", x = 7, y = simple_twfe_avg, label = "TWFE", 
+           hjust = 1.1, vjust = 1.5, color = "red", show.legend = FALSE)
+
+
 plot +
   # Add horizontal lines
   # geom_hline(yintercept = true_te_avg, linetype = "dashed", color = "blue") +
