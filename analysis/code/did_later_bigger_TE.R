@@ -372,11 +372,16 @@ sort(unique(dt$period))
 
 MAX_WEEKS # indicates the time window around treatment
 
+# improve 
+dt2 <- copy(dt)
+dt2[time_since_treat == -4, dep_var := dep_var + 1]
+
+
 ### create stacked data
 getdata <- function(i) {
   
   #keep what we need
-  dt %>% 
+  dt2 %>% 
     # keep focal treatment cohort (i) and the correct controls, i.e., cohorts treated after
     # keep treated units and all units not treated within specified time period
     filter(cohort_period == i | cohort_period > (i + MAX_WEEKS)) %>%
@@ -660,6 +665,8 @@ plot <- unique(mod_all_df[method!='ETWFE_manual' & method!='TWFE'], by = c('meth
 
 print(plot)  
 
+ggsave(paste0(out_dir,'all_mod.png'))
+
 ribbon_subset <- unique(mod_all_df[(t >= 0 & t <= 7) & method == 'TWFE', ], by = 't')
 
 
@@ -682,7 +689,6 @@ plot +
   # Add text labels for the horizontal lines
   # annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
   annotate("text", x = Inf, y = simple_twfe_avg, label = "TWFE", hjust = 1.1, vjust = 1.5, color = "red")
-ggsave(paste0(out_dir,'all_mod.png'))
 
 
 
@@ -740,7 +746,7 @@ plot <- ggplot(values[method!='Dynamic TWFE'], aes(x = method, y = value, fill =
   theme(legend.position = "none") +
   labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
   scale_y_continuous(expand = expansion(mult = c(0, 0.05)), # Adjust to ensure bars and error bars aren't cut off
-                     limits = c(0,19))  
+                     limits = c(0,11))  
 
 plot
 ggsave(paste0(out_dir, 'overall_att_comparison.png'))
