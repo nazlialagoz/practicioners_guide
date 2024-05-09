@@ -36,6 +36,10 @@ vignettes/*.pdf
 *.knit.md
 *.png
 *.jpg
+*.csv
+*.DS_Store
+*.tex
+*.rds
 
 # R Environment Variables
 .Renviron
