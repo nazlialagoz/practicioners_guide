@@ -189,45 +189,45 @@ msummary(canonical_did,
 
 
 # Bacon Decomposition
-# bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
-# summary(bacon_decomp)
-# bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
-# 
-# # Illustrate one of the estimates. 
-# # treated : 3, control: 2, est = -2.76, weight 0.03 Later vs Earlier Treated
-# # group 3 is treated in time 3. so we look at periods 2 vs 3
-# treat_bef = mean(dt[cohort_period==3 & period==2]$dep_var)
-# treat_aft = mean(dt[cohort_period==3 & period>=3]$dep_var)
-# control_bef = mean(dt[cohort_period==2 & period==2]$dep_var)
-# control_aft = mean(dt[cohort_period==2 & period>=3]$dep_var)
-# treat_diff = treat_aft- treat_bef
-# control_diff = control_aft- control_bef
-# treat_diff-control_diff
-# 
-# 
-# ggplot(bacon_decomp) +
-#   aes(x = weight, y = estimate, shape = factor(type)) +
-#   geom_point(size = 2) +
-#   geom_hline(yintercept = 0) + 
-#   theme_minimal()  +
-#   labs(x = "Weight", y = "Estimate", shape = "Type")
-# ggsave(paste0(out_dir, 'bacon_decomp.png'))
-# 
-# # Assuming bacon_decomp is loaded in your R session
-# library(xtable)
-# bacon_decomp <- data.table(bacon_decomp)
-# bacon_decomp[, treated:=as.integer(treated)]
-# bacon_decomp[, untreated:=as.integer(untreated)]
-# bacon_decomp[, estimate:=round(estimate,2)]
-# bacon_decomp[, weight:=round(weight,2)]
-# setnames(bacon_decomp, colnames(bacon_decomp), tools::toTitleCase(colnames(bacon_decomp)))
-# # Convert the data frame to a LaTeX table
-# latex_table <- xtable(bacon_decomp)
-# 
-# # Print the LaTeX code for the table
-# print(latex_table, include.rownames = FALSE, 
-#       hline.after = c(-1, 0), # Horizontal lines at the top of the table
-#       booktabs = TRUE) # Use booktabs style for a more professional look
+bacon_decomp <- bacon(formula, dt, id_var="unit", time_var='period', quietly = F)
+summary(bacon_decomp)
+bacon_decomp_avg <- sum(bacon_decomp$weight * bacon_decomp$estimate)
+
+# Illustrate one of the estimates.
+# treated : 3, control: 2, est = -2.76, weight 0.03 Later vs Earlier Treated
+# group 3 is treated in time 3. so we look at periods 2 vs 3
+treat_bef = mean(dt[cohort_period==3 & period==2]$dep_var)
+treat_aft = mean(dt[cohort_period==3 & period>=3]$dep_var)
+control_bef = mean(dt[cohort_period==2 & period==2]$dep_var)
+control_aft = mean(dt[cohort_period==2 & period>=3]$dep_var)
+treat_diff = treat_aft- treat_bef
+control_diff = control_aft- control_bef
+treat_diff-control_diff
+
+
+ggplot(bacon_decomp) +
+  aes(x = weight, y = estimate, shape = factor(type)) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0) +
+  theme_minimal()  +
+  labs(x = "Weight", y = "Estimate", shape = "Type")
+ggsave(paste0(out_dir, 'bacon_decomp.png'))
+
+# Assuming bacon_decomp is loaded in your R session
+library(xtable)
+bacon_decomp <- data.table(bacon_decomp)
+bacon_decomp[, treated:=as.integer(treated)]
+bacon_decomp[, untreated:=as.integer(untreated)]
+bacon_decomp[, estimate:=round(estimate,2)]
+bacon_decomp[, weight:=round(weight,2)]
+setnames(bacon_decomp, colnames(bacon_decomp), tools::toTitleCase(colnames(bacon_decomp)))
+# Convert the data frame to a LaTeX table
+latex_table <- xtable(bacon_decomp)
+
+# Print the LaTeX code for the table
+print(latex_table, include.rownames = FALSE,
+      hline.after = c(-1, 0), # Horizontal lines at the top of the table
+      booktabs = TRUE) # Use booktabs style for a more professional look
 
 # B) DiD with post-period-cohort specific TEs ----------------------------------
 
@@ -372,11 +372,16 @@ sort(unique(dt$period))
 
 MAX_WEEKS # indicates the time window around treatment
 
+
+# improve 
+dt2 <- copy(dt)
+dt2[time_since_treat == -4, dep_var := dep_var - 2]
+
 ### create stacked data
 getdata <- function(i) {
   
   #keep what we need
-  dt %>% 
+  dt2 %>% 
     # keep focal treatment cohort (i) and the correct controls, i.e., cohorts treated after
     # keep treated units and all units not treated within specified time period
     filter(cohort_period == i | cohort_period > (i + MAX_WEEKS)) %>%
@@ -660,6 +665,8 @@ plot <- unique(mod_all_df[method!='ETWFE_manual' & method!='TWFE'], by = c('meth
 
 print(plot)  
 
+ggsave(paste0(out_dir,'all_mod.png'))
+
 ribbon_subset <- unique(mod_all_df[(t >= 0 & t <= 7) & method == 'TWFE', ], by = 't')
 
 
@@ -682,7 +689,7 @@ plot +
   # Add text labels for the horizontal lines
   # annotate("text", x = Inf, y = true_te_avg, label = "True avg te", hjust = 1.1, vjust = 1.5, color = "blue") +
   annotate("text", x = Inf, y = simple_twfe_avg, label = "TWFE", hjust = 1.1, vjust = 1.5, color = "red")
-ggsave(paste0(out_dir,'all_mod.png'))
+
 
 
 
@@ -740,7 +747,7 @@ plot <- ggplot(values[method!='Dynamic TWFE'], aes(x = method, y = value, fill =
   theme(legend.position = "none") +
   labs(x = "", y = "Value") + # , title = "Comparison of Overall ATT Estimates"
   scale_y_continuous(expand = expansion(mult = c(0, 0.05)), # Adjust to ensure bars and error bars aren't cut off
-                     limits = c(0,11))  
+                     limits = c(0,9))  
 
 plot
 ggsave(paste0(out_dir, 'overall_att_comparison.png'))
