@@ -85,7 +85,7 @@ sim_data <- function(...){
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
-  data[cohort_period==4, tau := 4*tau]
+  data[cohort_period==4, tau := 2*tau]
   # calculate tau_cum
   setkeyv(data, c('unit', 'period')) # order
   data[cohort_period==4, tau_cum := cumsum(tau), by = unit]
@@ -94,12 +94,14 @@ sim_data <- function(...){
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
-  data[cohort_period==3, tau := 2*tau]
+  data[cohort_period==3, tau := 1.5*tau]
   # calculate tau_cum
   setkeyv(data, c('unit', 'period')) # order
   data[cohort_period==3, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
   data[cohort_period==3, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
+  
+  
   
   setkeyv(data, c('unit', 'period'))
   
