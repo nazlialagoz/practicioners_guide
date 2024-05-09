@@ -85,26 +85,26 @@ sim_data <- function(...){
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
-  data[cohort_period==2, tau := 3*tau]
+  data[cohort_period==2, tau := 2*tau]
   # calculate tau_cum
   setkeyv(data, c('unit', 'period')) # order
-  data[cohort_period==2 & period == 2, tau := 21] # increase initial effect
+  data[cohort_period==2 & period == 2, tau := 16.04] # increase initial effect
   data[cohort_period==2, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
   data[cohort_period==2, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
   
   # Introduce heterogeneity in treatment effects 
   # calculate the new tau
-  data[cohort_period==3, tau := 2*tau]
+  data[cohort_period==3, tau := 1.5*tau]
   # calculate tau_cum
   setkeyv(data, c('unit', 'period')) # order
-  data[cohort_period==3 & period == 3, tau := 12] # increase initial effect
+  data[cohort_period==3 & period == 3, tau := 10.5] # increase initial effect
   data[cohort_period==3, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
   data[cohort_period==3, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
   
   
-  data[cohort_period==4 & period == 4, tau := 5] # increase initial effect
+  data[cohort_period==4 & period == 4, tau := 5.5] # increase initial effect
   data[cohort_period==4, tau_cum := cumsum(tau), by = unit]
   # calculate the dependent variable
   data[cohort_period==4, dep_var := calc_dep_var(constant,unit_fe,period_fe,tau_cum,error)]
